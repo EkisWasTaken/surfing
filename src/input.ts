@@ -2,16 +2,21 @@ import { config } from './config';
 import type { Cmd } from './movement';
 
 const SPIKE = 500;
+const SPIKE_RATIO = 8;
 
-// Some browsers report a huge delta on the first event after pointer lock, and occasional spikes.
+// Some browsers report a huge delta on the first event after pointer lock, and occasional
+// isolated spikes. Real flicks ramp up over several events, so only drop sudden jumps.
 export function mouseFilter(): (dx: number, dy: number) => [number, number] {
   let first = true;
+  let prev = 0;
   return (dx, dy) => {
     if (first) {
       first = false;
       return [0, 0];
     }
-    if (Math.abs(dx) > SPIKE || Math.abs(dy) > SPIKE) return [0, 0];
+    const mag = Math.max(Math.abs(dx), Math.abs(dy));
+    if (mag > SPIKE && mag > prev * SPIKE_RATIO) return [0, 0];
+    prev = mag;
     return [dx, dy];
   };
 }
@@ -25,8 +30,9 @@ export function createInput(canvas: HTMLCanvasElement) {
 
   canvas.addEventListener('click', () => {
     // Raw input where supported (matches CS:GO raw input); fall back to plain lock.
-    const req = canvas.requestPointerLock({ unadjustedMovement: true } as PointerLockOptions) as unknown as Promise<void> | undefined;
-    req?.catch?.(() => canvas.requestPointerLock());
+    // Failures surface via 'pointerlockerror', so the promises only need their rejections swallowed.
+    const lock = (opts?: PointerLockOptions) => canvas.requestPointerLock(opts) as unknown as Promise<void> | undefined;
+    lock({ unadjustedMovement: true })?.catch?.(() => lock()?.catch?.(() => {}));
   });
   document.addEventListener('pointerlockchange', () => {
     filter = mouseFilter();

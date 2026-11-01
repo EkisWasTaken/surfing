@@ -25,3 +25,11 @@ describe('mouseFilter', () => {
     expect(f(900, 0)).toEqual([0, 0]);
   });
 });
+
+describe('mouseFilter flicks', () => {
+  it('keeps a fast flick that ramps up', () => {
+    const f = mouseFilter();
+    f(0, 0);
+    for (const dx of [120, 380, 650, 700, 420]) expect(f(dx, 0)).toEqual([dx, 0]);
+  });
+});

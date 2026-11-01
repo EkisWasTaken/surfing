@@ -27,7 +27,7 @@ const material = new THREE.ShaderMaterial({
     }`,
 });
 
-function rampGeometry(b: Brush): THREE.BufferGeometry {
+export function rampGeometry(b: Brush): THREE.BufferGeometry {
   const { mins: o, maxs: m } = b;
   const left = b.side === 'left';
   const wallY = left ? o.y : m.y, footY = left ? m.y : o.y;
@@ -40,7 +40,9 @@ function rampGeometry(b: Brush): THREE.BufferGeometry {
     [a1, a2, b2], [a1, b2, b1], // slope
     [a0, b0, b2], [a0, b2, a2], // bottom
   ];
-  const pos = faces.flatMap((f) => f.flatMap((v) => [v.x, v.y, v.z]));
+  // Mirroring a right ramp into a left one flips handedness, so flip the winding back.
+  const wound = left ? faces.map(([a, b, c]) => [a, c, b]) : faces;
+  const pos = wound.flatMap((f) => f.flatMap((v) => [v.x, v.y, v.z]));
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.computeVertexNormals();

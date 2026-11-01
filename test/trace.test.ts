@@ -52,3 +52,18 @@ describe('trace', () => {
     expect(hit).toBe(true);
   });
 });
+
+describe('ramp bevels', () => {
+  it('stops at the real apex, not a phantom slope above it', () => {
+    const ramp = makeRamp(vec(0, 0, 0), 512, 256, 256, 'left'); // apex edge at y=0, z=256
+    for (const y of [0, -16]) {
+      const t = trace(vec(256, y, 400), vec(256, y, 0), mins, maxs, [ramp]);
+      expect(t.endPos.z).toBeLessThan(256 + 1);
+    }
+  });
+  it('has no phantom slope past the foot', () => {
+    const ramp = makeRamp(vec(0, 0, 0), 512, 256, 256, 'left'); // foot edge at y=256, z=0
+    const t = trace(vec(256, 256 + 17, -40), vec(256, 256 + 17, 40), mins, maxs, [ramp]);
+    expect(t.fraction).toBe(1);
+  });
+});

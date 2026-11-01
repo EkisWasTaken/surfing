@@ -36,6 +36,9 @@ export function makeRamp(origin: Vec3, length: number, width: number, height: nu
       plane(vec(0, 0, -1), origin),
       left ? plane(vec(0, -1, 0), origin) : plane(vec(0, 1, 0), maxs),
       plane(slopeNormal, foot),
+      // Axial bevels: redundant for the shape, but stop the box-expanded slope overshooting the apex/foot.
+      plane(vec(0, 0, 1), maxs),
+      left ? plane(vec(0, 1, 0), maxs) : plane(vec(0, -1, 0), origin),
     ],
   };
 }
