@@ -10,6 +10,7 @@
     "import-maps": "vite-node scripts/import-maps.ts"
   },
   "dependencies": {
+    "meshoptimizer": "^0.25.0",
     "three": "^0.170.0"
   },
   "devDependencies": {
