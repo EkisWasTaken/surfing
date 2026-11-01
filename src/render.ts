@@ -357,6 +357,7 @@ export function createRenderer(canvas: HTMLCanvasElement) {
     },
     setKnife: (mesh: Parameters<typeof viewmodel.setKnife>[0]) => viewmodel.setKnife(mesh, renderer.extensions.has('EXT_texture_compression_bptc')),
     inspect: () => viewmodel.inspect(),
+    attack: (kind: 'light' | 'heavy') => viewmodel.attack(kind),
     setFinish: (choice: Parameters<typeof viewmodel.setFinish>[0]) => viewmodel.setFinish(choice, renderer.extensions.has('EXT_texture_compression_bptc')),
     setArms: (b: Parameters<typeof viewmodel.setArms>[0]) => viewmodel.setArms(b, renderer.extensions.has('EXT_texture_compression_bptc')),
     setFov(fov: number) {

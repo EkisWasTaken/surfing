@@ -17,7 +17,7 @@ type Track = { frames: number; duration: number; poses: Float32Array };
 // Arms poses (viewmodel skeleton) plus the knife's own bones (its skeleton), sampled on the same clock.
 export type ViewmodelClip = Track & { knife: Track | null };
 export type ArmsBundle = { skeleton: NmSkeleton; arms: Cs2Mesh };
-export type KnifeBundle = { mesh: Cs2Mesh; skeleton: NmSkeleton | null; clips: Record<'draw' | 'idle' | 'lookat01', ViewmodelClip>; paint: PaintInputs | null };
+export type KnifeBundle = { mesh: Cs2Mesh; skeleton: NmSkeleton | null; clips: Record<'draw' | 'idle' | 'lookat01' | 'light1' | 'light2' | 'heavy', ViewmodelClip>; paint: PaintInputs | null };
 export type FinishChoice = { finish: Finish & { pattern: Vtex | null }; shared: FinishShared; wear: number; seed: number };
 
 function material(t: Vtex | null, bptc: boolean, metal: number) {
@@ -124,6 +124,7 @@ export function createViewmodel(renderer: THREE.WebGLRenderer) {
   let arms: ReturnType<typeof skinnedRig> | null = null;
   let knife: { root: THREE.Object3D; mesh: THREE.Mesh; base: THREE.MeshStandardMaterial[]; rig: ReturnType<typeof skinnedRig> | null; clips: KnifeBundle['clips']; paint: PaintInputs | null } | null = null;
   let anim = { clip: 'draw' as keyof KnifeBundle['clips'], start: -1 }; // start < 0: begins on the first drawn frame (after upload/compile stalls)
+  let nextAttack = 0, slashLeft = false;
   const mount = () => knife && (arms?.bone('wpn') ?? hold).add(knife.root); // weapons ride the viewmodel skeleton's wpn bone
 
   return {
@@ -157,6 +158,15 @@ export function createViewmodel(renderer: THREE.WebGLRenderer) {
     },
     inspect() {
       if (anim.clip === 'idle') anim = { clip: 'lookat01', start: performance.now() };
+    },
+    // CS knife timing on a miss: slash every 0.5 s (alternating sides), stab every 1 s; either interrupts draw/inspect.
+    attack(kind: 'light' | 'heavy') {
+      const now = performance.now();
+      if (!knife || now < nextAttack) return;
+      const clip = kind === 'heavy' ? 'heavy' : slashLeft ? 'light2' : 'light1';
+      if (kind === 'light') slashLeft = !slashLeft;
+      nextAttack = now + (kind === 'heavy' ? 1000 : 500);
+      anim = { clip, start: now };
     },
     resize(aspect: number) {
       camera.aspect = aspect;

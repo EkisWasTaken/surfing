@@ -120,7 +120,11 @@ if (existsSync(cs2Dir)) {
       const folder = ANIMS + (id === 'knife_default_ct' ? '_default_knife' : id) + '/';
       const inFolder = [...cs2.entries.keys()].filter((k) => k.startsWith(folder) && k.endsWith('.vnmclip_c'));
       const pick = (re: RegExp) => inFolder.find((k) => re.test(k.slice(folder.length)));
-      const clipFiles = { draw: pick(/^draw_/), idle: pick(/^idle1?_/), lookat01: pick(/^lookat01_(?!draw|transfix)/) };
+      // Attacks: the two alternating slashes (left click) and the stab (right click), in their "miss" versions.
+      const clipFiles = {
+        draw: pick(/^draw_/), idle: pick(/^idle1?_/), lookat01: pick(/^lookat01_(?!draw|transfix)/),
+        light1: pick(/^light_miss1_/), light2: pick(/^light_miss2_/), heavy: pick(/^heavy_miss1_(?!noflip)/),
+      };
       let knifeSkeleton: NmSkeleton | null = null;
       const clips = Object.fromEntries(
         Object.entries(clipFiles).map(([k, file]) => {

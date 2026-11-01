@@ -191,6 +191,7 @@ fetch('/maps/index.json')
 input.onLockChange((locked) => {
   hud.showOverlay(!locked);
   acc.reset();
+  held.clear();
 });
 window.addEventListener('keydown', (e) => {
   if (!input.locked()) return;
@@ -202,6 +203,13 @@ window.addEventListener('keydown', (e) => {
     hud.flash('Goal set here');
   } else if (e.code === 'KeyF') renderer.inspect(); // CS's inspect key
 });
+// Knife attacks: left click slashes, right click stabs; holding keeps attacking at CS's rate.
+const held = new Set<number>();
+window.addEventListener('mousedown', (e) => {
+  if (input.locked() && (e.button === 0 || e.button === 2)) held.add(e.button);
+});
+window.addEventListener('mouseup', (e) => held.delete(e.button));
+window.addEventListener('contextmenu', (e) => input.locked() && e.preventDefault());
 window.addEventListener('resize', renderer.resize);
 let last = performance.now();
 document.addEventListener('visibilitychange', () => {
@@ -236,6 +244,8 @@ function frame(now: number) {
   last = now;
   // Pause while unlocked or hidden; the accumulator was reset on those transitions.
   if (input.locked() && !document.hidden) {
+    if (held.has(0)) renderer.attack('light');
+    else if (held.has(2)) renderer.attack('heavy');
     const ticks = acc.advance(dt);
     if (ticks) {
       const cmd = input.cmd();

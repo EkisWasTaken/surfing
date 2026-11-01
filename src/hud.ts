@@ -57,7 +57,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
           <label class="check"><input name="autobhop" type="checkbox" /> Auto-bhop (hold jump)</label>
           <label class="check"><input name="showSpeed" type="checkbox" /> Show speed</label>
         </form>
-        <p class="keys">WASD move · Mouse look · Shift walk · C crouch · R restart · F set goal (imported maps) · Esc menu</p>
+        <p class="keys">WASD move · Mouse look · Left click slash · Right click stab · F inspect (or set goal on imported maps) · Shift walk · C crouch · R restart · Esc menu</p>
       </div>
     </div>`;
   const $ = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel)!;
