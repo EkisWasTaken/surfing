@@ -151,7 +151,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #2a2f25; }
 /* ---------- Chat (CS 1.6 say text: green tag, CT-blue name, yellow text) ---------- */
 #hud { --chat-text: #f2d37a; --chat-tag: #5fd83f; --chat-name: #99ccff; --chat-good: #8cf06a; --chat-bad: #ff6b5a; }
 #hud[data-game="csgo"] { --chat-text: #e6e8ec; --chat-tag: #8fd14f; --chat-name: #9cc6ff; --chat-good: #9be27a; --chat-bad: #ff8a7a; }
-.chat { position: absolute; left: 28px; bottom: 76px; width: min(620px, calc(100% - 56px)); display: flex; flex-direction: column; gap: 2px; }
+.chat { position: absolute; left: 28px; bottom: 104px; width: min(620px, calc(100% - 56px)); display: flex; flex-direction: column; gap: 2px; }
 .chat p { margin: 0; font: 700 14px/1.35 var(--font-ui); color: var(--chat-text); text-shadow: 1px 1px 0 #000, 0 0 4px #000a; animation: chat-life var(--life, 10s) linear forwards; }
 .chat .tag { color: var(--chat-tag); }
 .chat .name { color: var(--chat-name); }
@@ -192,3 +192,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #2a2f25; }
   font: inherit; color: var(--text); background: var(--well); padding: 4px 6px; width: 100%; box-sizing: border-box;
   border: 1px solid; border-color: var(--dark) var(--light) var(--light) var(--dark); border-radius: var(--radius);
 }
+
+/* Chat input: CS 1.6's "say :" line under the chat. */
+.say { position: absolute; left: 28px; bottom: 76px; width: min(620px, calc(100% - 56px)); display: flex; align-items: baseline; gap: 6px; pointer-events: auto; font: 700 14px/1.35 var(--font-ui); color: var(--chat-text); text-shadow: 1px 1px 0 #000; }
+.say input { flex: 1; min-width: 0; font: inherit; color: #fff; background: rgb(0 0 0 / 0.35); border: 0; border-bottom: 1px solid var(--chat-text); padding: 2px 4px; outline: none; }
+.say input:focus-visible { background: rgb(0 0 0 / 0.5); }
+.chat .said { color: var(--chat-text); }

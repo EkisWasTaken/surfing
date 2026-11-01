@@ -33,6 +33,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     <div class="flash" role="status" hidden></div>
     <div class="crosshair" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
     <div class="chat" aria-live="polite"></div>
+    <form class="say" hidden><label for="sayInput">say :</label><input id="sayInput" maxlength="127" autocomplete="off" spellcheck="false" /></form>
     <div class="loading" role="dialog" aria-labelledby="loadingTitle" hidden>
       <section class="window loadingWindow">
         <header class="titlebar"><h2 id="loadingTitle" class="loadingGame"></h2></header>
@@ -45,7 +46,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     </div>
     <div class="hudbar">
       <div class="hudItem speed" aria-label="Speed">${ICON.speed}<span class="speedVal">0</span><small>u/s</small></div>
-      <div class="hudItem timer" aria-label="Run time">${ICON.clock}<span class="time">0:00.000</span></div>
+      <div class="hudItem timer" aria-label="Run time">${ICON.clock}<span class="time">0:00.000</span><small class="practiceTag" hidden>practice</small></div>
       <div class="hudItem best" aria-label="Personal best" hidden>${ICON.flag}<span class="bestVal"></span></div>
     </div>
     <div class="overlay">
@@ -80,6 +81,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
             </label>
             <label class="row check"><input name="autobhop" type="checkbox" /><span>Jump again automatically while holding jump</span></label>
             <label class="row check"><input name="showSpeed" type="checkbox" /><span>Show speed on the HUD</span></label>
+            <label class="row check"><input name="showGhost" type="checkbox" /><span>Race a ghost of your best run</span></label>
           </div>
           <div class="sheet" role="tabpanel" id="sheet-knife" aria-labelledby="tab-knife" hidden>
             <p class="note noKnives">Knives appear after running <code>npm run import-maps</code> with CS2 installed.</p>
@@ -117,6 +119,9 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
                 <tr class="cs2Only"><td>Inspect knife</td><td>F</td></tr>
                 <tr><td>Mark the finish (maps without one)</td><td>F</td></tr>
                 <tr><td>Restart run</td><td>R</td></tr>
+                <tr><td>Save checkpoint</td><td>1</td></tr>
+                <tr><td>Teleport to checkpoint (practice)</td><td>2</td></tr>
+                <tr><td>Chat (type !help for commands)</td><td>Y</td></tr>
                 <tr><td>Open this menu</td><td>Esc</td></tr>
               </tbody>
             </table>
@@ -180,6 +185,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   showGame();
   el.autobhop.checked = cur.autobhop;
   el.showSpeed.checked = cur.showSpeed;
+  el.showGhost.checked = cur.showGhost;
   el.wear.value = String(cur.wear);
   el.seed.value = String(cur.seed);
   const wearLabel = (w: number) => `${w.toFixed(3)}, ${w < 0.07 ? 'Factory New' : w < 0.15 ? 'Minimal Wear' : w < 0.38 ? 'Field-Tested' : w < 0.45 ? 'Well-Worn' : 'Battle-Scarred'}`;
@@ -210,6 +216,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       game: el.game.value === 'cs16' ? 'cs16' : 'csgo',
       autobhop: el.autobhop.checked,
       showSpeed: el.showSpeed.checked,
+      showGhost: el.showGhost.checked,
       knife: el.knife.value || cur.knife,
       // An unchanged finish list keeps the saved finish even if this knife doesn't offer it.
       finish: e.target === el.finish ? el.finish.value : cur.finish,
@@ -254,8 +261,52 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   const day = (at: number) => (at ? new Date(at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : 'before records were kept');
   const mapLabel = (id: string) => ([...el.map.options].find((o) => o.value === id)?.text ?? id.replace(/^bsp:/, '').replace(/\.bsp$/i, '')).replace(/^CS:GO: /, '');
 
+  // Typing in chat (CS's messagemode): Enter sends, Esc or leaving the field cancels.
+  const say = $<HTMLFormElement>('.say'), sayInput = $<HTMLInputElement>('#sayInput');
+  let onSaid: ((text: string) => void) | null = null, onSayClosed: (() => void) | null = null;
+  const closeSay = () => {
+    if (say.hidden) return;
+    say.hidden = true;
+    sayInput.value = '';
+    sayInput.blur();
+    onSayClosed?.();
+  };
+  say.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = sayInput.value;
+    closeSay();
+    if (text.trim()) onSaid?.(text.trim());
+  });
+  sayInput.addEventListener('keydown', (e) => {
+    e.stopPropagation(); // keys typed here are text, not game controls
+    if (e.key === 'Escape') closeSay();
+  });
+  sayInput.addEventListener('blur', closeSay);
+
   let flashTimer = 0;
   return {
+    // A map id whose name contains the query (chat's !map), preferring an exact name.
+    findMap(query: string) {
+      const q = query.toLowerCase().trim(), opts = [...el.map.options];
+      const name = (o: HTMLOptionElement) => o.text.toLowerCase().replace(/^cs:go: /, '');
+      return (opts.find((o) => name(o) === q) ?? opts.find((o) => name(o).includes(q)))?.value ?? null;
+    },
+    openSay(onSend: (text: string) => void, onClose: () => void) {
+      onSaid = onSend;
+      onSayClosed = onClose;
+      say.hidden = false;
+      sayInput.focus();
+    },
+    // Settings changed from outside the menu (chat commands): update the form, then apply like a menu change.
+    apply(patch: Partial<Settings>) {
+      for (const [k, v] of Object.entries(patch)) {
+        const field = el[k];
+        if (!field) continue;
+        if ((field as HTMLInputElement).type === 'checkbox') (field as HTMLInputElement).checked = Boolean(v);
+        else field.value = String(v);
+      }
+      change(patch);
+    },
     chat(parts: { text: string; tone?: 'tag' | 'name' | 'good' | 'bad' }[]) {
       const line = document.createElement('p');
       line.style.setProperty('--life', `${CHAT_SECONDS}s`);
@@ -306,7 +357,8 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     },
     setSpeed: (u: number) => (speedVal.textContent = String(Math.round(u))),
     showOverlay: (show: boolean) => (overlay.hidden = !show),
-    setTimer(t: string, bestText: string) {
+    setTimer(t: string, bestText: string, practice = false) {
+      $('.practiceTag').hidden = !practice;
       time.textContent = t;
       bestVal.textContent = bestText.replace(/^PB /, '');
       best.hidden = !bestText;

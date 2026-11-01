@@ -1,8 +1,8 @@
 import { config, setGameMode, GameMode } from './config';
 
-export type Settings = { name: string; game: GameMode; sensitivity: number; fov: number; tickrate: 64 | 128; autobhop: boolean; showSpeed: boolean; map: string; jumpBind: string; knife: string; finish: string; wear: number; seed: number };
+export type Settings = { name: string; game: GameMode; sensitivity: number; fov: number; tickrate: 64 | 128; autobhop: boolean; showSpeed: boolean; map: string; jumpBind: string; showGhost: boolean; knife: string; finish: string; wear: number; seed: number };
 
-export const defaults: Settings = { name: 'Player', game: 'csgo', sensitivity: 2, fov: 90, tickrate: 64, autobhop: true, showSpeed: true, map: 'sandbox', jumpBind: 'Space', knife: 'knife_default_ct', finish: '', wear: 0.01, seed: 0 };
+export const defaults: Settings = { name: 'Player', game: 'csgo', sensitivity: 2, fov: 90, tickrate: 64, autobhop: true, showSpeed: true, map: 'sandbox', jumpBind: 'Space', showGhost: true, knife: 'knife_default_ct', finish: '', wear: 0.01, seed: 0 };
 
 const KEY = 'surf-settings';
 const num = (v: unknown, min: number, max: number, fallback: number) =>
@@ -27,6 +27,7 @@ export function parseSettings(raw: string | null): Settings {
     showSpeed: bool(o.showSpeed, defaults.showSpeed),
     map: typeof o.map === 'string' ? o.map : defaults.map,
     // A KeyboardEvent.code or WheelUp/WheelDown; Escape is reserved for the menu.
+    showGhost: bool(o.showGhost, defaults.showGhost),
     knife: typeof o.knife === 'string' && /^knife_[a-z0-9_]{1,32}$/.test(o.knife) ? o.knife : defaults.knife, // also a file name: keep it strict
     finish: typeof o.finish === 'string' && /^[a-z0-9_]{0,64}$/.test(o.finish) ? o.finish : defaults.finish, // '' = vanilla; also a file name
     wear: num(o.wear, 0, 1, defaults.wear),

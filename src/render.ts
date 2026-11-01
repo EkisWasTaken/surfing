@@ -298,6 +298,10 @@ export function createRenderer(canvas: HTMLCanvasElement) {
   let hfov = 90;
 
   const viewmodel = createViewmodel(renderer);
+  // Ghost of your best run: a see-through player-sized capsule (32 wide, 72 tall, like the hull).
+  const ghost = new THREE.Mesh(new THREE.CapsuleGeometry(16, 40, 4, 12), new THREE.MeshBasicMaterial({ color: 0x9fd4ff, transparent: true, opacity: 0.35, depthWrite: false }));
+  ghost.visible = false;
+  scene.add(ghost);
   renderer.autoClear = false; // world, then the knife on top with only depth cleared
   const resize = () => {
     renderer.setSize(window.innerWidth, window.innerHeight, false);
@@ -362,6 +366,10 @@ export function createRenderer(canvas: HTMLCanvasElement) {
     attack: (kind: 'light' | 'heavy') => viewmodel.attack(kind),
     setFinish: (choice: Parameters<typeof viewmodel.setFinish>[0]) => viewmodel.setFinish(choice, renderer.extensions.has('EXT_texture_compression_bptc')),
     setArms: (b: Parameters<typeof viewmodel.setArms>[0]) => viewmodel.setArms(b, renderer.extensions.has('EXT_texture_compression_bptc')),
+    setGhost(pos: Vec3 | null) {
+      ghost.visible = !!pos;
+      if (pos) ghost.position.copy(toThree(pos)).add(new THREE.Vector3(0, 36, 0));
+    },
     setFov(fov: number) {
       hfov = fov;
       resize();

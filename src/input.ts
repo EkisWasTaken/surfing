@@ -35,6 +35,7 @@ export function createInput(canvas: HTMLCanvasElement) {
   let filter = mouseFilter();
   let jumpBind = 'Space';
   let jumpPulse = false; // wheel notches are instant, so they count as one tick of jump
+  let typing = false; // chat open: keys are text, not movement
   const listeners: ((locked: boolean) => void)[] = [];
   const locked = () => document.pointerLockElement === canvas;
 
@@ -60,13 +61,13 @@ export function createInput(canvas: HTMLCanvasElement) {
     pitch = Math.max(-89, Math.min(89, pitch + dy * config.sensitivity * config.mPitch));
   });
   window.addEventListener('keydown', (e) => {
-    if (!locked()) return;
+    if (!locked() || typing) return;
     keys.add(e.code);
     if (e.code === 'Space' || e.code === jumpBind) e.preventDefault();
   });
   window.addEventListener('keyup', (e) => keys.delete(e.code));
   document.addEventListener('wheel', (e) => {
-    if (locked() && wheelCode(e.deltaY) === jumpBind) jumpPulse = true;
+    if (locked() && !typing && wheelCode(e.deltaY) === jumpBind) jumpPulse = true;
   });
 
   const k = (c: string) => (keys.has(c) ? 1 : 0);
@@ -87,6 +88,10 @@ export function createInput(canvas: HTMLCanvasElement) {
       };
     },
     view: () => ({ yaw, pitch }),
+    setTyping(on: boolean) {
+      typing = on;
+      keys.clear(); // whatever was held when chat opened is released
+    },
     setJumpBind(b: string) {
       jumpBind = b;
     },

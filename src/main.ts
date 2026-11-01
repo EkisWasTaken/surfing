@@ -18,6 +18,7 @@ import { createRenderer } from './render';
 import { createHud } from './hud';
 import { newRun, tickRun, formatTime, Run } from './timer';
 import { loadRecords, saveRecords, recordFinish, recordKey, FinishResult } from './records';
+import { ghostFromTicks, sampleGhost, loadGhost, saveGhost, Ghost } from './ghost';
 import { Settings, loadSettings, saveSettings, applySettings } from './settings';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#game')!;
@@ -37,6 +38,11 @@ let grid = createGrid(map.brushes);
 let prev: Player, cur: Player;
 let run: Run = newRun();
 let records = loadRecords();
+let ghost: Ghost | null = null; // your best run on this map in this game
+let recording: number[] = []; // x, y, z, yaw per tick of the current run
+let practice = false; // a checkpoint teleport this run: it can't be a record
+let maxSpeed = 0;
+let typing = false; // chat input open
 const best = () => records[recordKey(settings.game, map.id)]?.best ?? null; // per game: CS:GO and 1.6 times differ
 let simState = newTickState(); // once-pushes, health and hurt timing carried between ticks
 let pose = newPose(); // knife bob/sway
@@ -46,6 +52,7 @@ let lastTickYaw = 0; // yaw the previous tick used, for spreading mouse turn acr
 function respawn() {
   prev = cur = newPlayer(map.spawn);
   simState = newTickState();
+  practice = false;
   input.setView(map.spawnYaw, 0);
   lastTickYaw = map.spawnYaw;
   run = newRun();
@@ -56,6 +63,7 @@ function useMap(m: MapDef) {
   grid = createGrid(m.brushes);
   m.spawn = unstick(m.spawn, m.brushes);
   const textures = renderer.setMap(m);
+  ghost = loadGhost(settings.game, m.id);
   respawn();
   return textures;
 }
@@ -76,7 +84,7 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
     input.setJumpBind(next.jumpBind);
     renderer.setFov(next.fov);
     if (tickChanged) acc = createAccumulator(1 / config.tickrate);
-    if (gameChanged) renderer.setGame(next.game);
+    if (gameChanged) (renderer.setGame(next.game), (ghost = loadGhost(next.game, map.id)));
     if (gameChanged && !mapChanged) respawn(); // hulls and rules differ: start the run over under the new ones
     if (gameChanged && !mapChanged) (announceMap(), refreshRecords());
     if (knifeChanged) loadKnife(next.knife);
@@ -104,7 +112,7 @@ function announceMap() {
   hud.chat([{ text: '[Surf] ', tone: 'tag' }, { text: `Now on ${mapShort(map)} with ${gameName()} movement. ` }, pb === null ? { text: 'No record here yet: leave the start zone to begin.' } : { text: `Your best: ${formatTime(pb)}`, tone: 'good' }]);
 }
 function announceFinish(r: FinishResult) {
-  const t = formatTime(run.time), head = [{ text: '[Surf] ', tone: 'tag' as const }, { text: player(), tone: 'name' as const }];
+  const t = `${formatTime(run.time)} (max ${Math.round(maxSpeed)} u/s)`, head = [{ text: '[Surf] ', tone: 'tag' as const }, { text: player(), tone: 'name' as const }];
   if (r.kind === 'first') {
     hud.chat([...head, { text: ` finished ${mapShort(map)} in ${t}. ` }, { text: 'First record on this map!', tone: 'good' }]);
     hud.flash(`First record: ${t}`);
@@ -117,6 +125,76 @@ function announceFinish(r: FinishResult) {
     hud.flash(`Finished ${t}`);
   }
 }
+const surf = (...parts: { text: string; tone?: 'good' | 'bad' }[]) => hud.chat([{ text: '[Surf] ', tone: 'tag' }, ...parts]);
+
+// Checkpoints (surf servers' saveloc): position, view and speed. Teleporting to one makes the run practice.
+const checkpoints: { pos: Player['pos']; vel: Player['vel']; yaw: number; pitch: number; ducked: boolean }[] = [];
+let checkpointCount = 0;
+function saveCheckpoint() {
+  checkpoints.push({ pos: { ...cur.pos }, vel: { ...cur.vel }, ...input.view(), ducked: cur.ducked });
+  if (checkpoints.length > 10) checkpoints.shift();
+  surf({ text: `Checkpoint ${++checkpointCount} saved. Press 2 (or !tele) to go back to it.` });
+}
+function teleportCheckpoint() {
+  const c = checkpoints.at(-1);
+  if (!c) return surf({ text: 'No checkpoint yet: press 1 (or !cp) to save one.', tone: 'bad' });
+  prev = cur = { ...newPlayer(c.pos), vel: { ...c.vel }, ducked: c.ducked };
+  simState = newTickState();
+  input.setView(c.yaw, c.pitch);
+  lastTickYaw = c.yaw;
+  if (!practice && run.phase === 'running') surf({ text: "Practice mode: this run won't count as a record. Go back to the start (R) for a real run.", tone: 'bad' });
+  practice = true;
+}
+
+// Chat: Y opens the say line. "!command" shows in chat and runs; "/command" runs silently, as on CS servers.
+function openChat() {
+  typing = true;
+  held.clear();
+  input.setTyping(true);
+  hud.openSay(onSay, () => {
+    typing = false;
+    input.setTyping(false);
+  });
+}
+function onSay(text: string) {
+  const command = /^[!/]./.test(text) ? text.slice(1).trim().split(/\s+/) : null;
+  if (!command || text[0] === '!') hud.chat([{ text: player(), tone: 'name' }, { text: ` :  ${text}` }]);
+  if (command) runCommand(command[0].toLowerCase(), command.slice(1));
+}
+function runCommand(name: string, args: string[]) {
+  switch (name) {
+    case 'r': case 'restart': case 'start':
+      respawn();
+      return surf({ text: 'Back to the start.' });
+    case 'pb': case 'best': {
+      const pb = best();
+      return surf(pb === null ? { text: `No record on ${mapShort(map)} yet in ${gameName()}.` } : { text: `Your best on ${mapShort(map)} (${gameName()}): ${formatTime(pb)}`, tone: 'good' });
+    }
+    case 'cp': case 'save': case 'saveloc':
+      return saveCheckpoint();
+    case 'tele': case 'tp': case 'teleport':
+      return teleportCheckpoint();
+    case 'ghost':
+      hud.apply({ showGhost: !settings.showGhost });
+      return surf({ text: settings.showGhost ? (ghost ? 'Ghost on: race your best run.' : 'Ghost on. Set a record here and it will race you next time.') : 'Ghost off.' });
+    case 'game': {
+      const a = (args[0] ?? '').toLowerCase(), g = /1\.?6/.test(a) ? 'cs16' : /go|cs2/.test(a) ? 'csgo' : null;
+      if (!g) return surf({ text: 'Usage: !game cs16 or !game csgo', tone: 'bad' });
+      return hud.apply({ game: g });
+    }
+    case 'map': case 'nominate': {
+      const id = args[0] ? hud.findMap(args.join(' ')) : null;
+      if (!id) return surf({ text: args[0] ? `No map matching "${args.join(' ')}". Open the menu (Esc) to see them all.` : 'Usage: !map <name>, e.g. !map beginner', tone: 'bad' });
+      return hud.apply({ map: id });
+    }
+    case 'help': case 'commands':
+      surf({ text: 'Commands: !r restart, !pb your best, !cp save a checkpoint, !tele go back to it (practice),' });
+      return surf({ text: '!ghost on or off, !map <name> change map, !game cs16 or csgo switch game.' });
+    default:
+      return surf({ text: `Unknown command !${name}. Type !help for the list.`, tone: 'bad' });
+  }
+}
+
 function refreshRecords() {
   const prefix = `${settings.game}:`;
   const rows = Object.entries(records)
@@ -280,7 +358,13 @@ input.onLockChange((locked) => {
   held.clear();
 });
 window.addEventListener('keydown', (e) => {
-  if (!input.locked()) return;
+  if (!input.locked() || typing) return;
+  if (e.code === 'KeyY') {
+    e.preventDefault(); // so the Y isn't typed into the chat line it opens
+    return openChat();
+  }
+  if (e.code === 'Digit1') saveCheckpoint();
+  if (e.code === 'Digit2') teleportCheckpoint();
   if (e.code === 'KeyR') respawn();
   // Imported maps without a goal trigger: mark the finish where you stand.
   if (e.code === 'KeyF' && map.mesh && !(map as { goalFromMap?: boolean }).goalFromMap) {
@@ -292,7 +376,7 @@ window.addEventListener('keydown', (e) => {
 // Knife attacks: left click slashes, right click stabs; holding keeps attacking at CS's rate.
 const held = new Set<number>();
 window.addEventListener('mousedown', (e) => {
-  if (input.locked() && (e.button === 0 || e.button === 2)) held.add(e.button);
+  if (input.locked() && !typing && (e.button === 0 || e.button === 2)) held.add(e.button);
 });
 window.addEventListener('mouseup', (e) => held.delete(e.button));
 window.addEventListener('contextmenu', (e) => input.locked() && e.preventDefault());
@@ -320,12 +404,32 @@ function tick(cmd: ReturnType<typeof input.cmd>, tickDt: number) {
   }
   const was = run.phase;
   run = tickRun(run, touching(cur, map.startZone), touching(cur, map.endZone), tickDt);
+  const speed = Math.hypot(cur.vel.x, cur.vel.y);
+  if (run.phase === 'ready') practice = false; // back in the start zone: a fresh, valid run
+  if (run.phase !== 'ready' && was === 'ready') {
+    // Left the start zone: what surf timers call start speed (prestrafe).
+    recording = [];
+    maxSpeed = 0;
+    surf({ text: `Start speed: ${Math.round(speed)} u/s` });
+  }
+  if (run.phase !== 'ready' && was !== 'finished') {
+    recording.push(cur.pos.x, cur.pos.y, cur.pos.z, lastTickYaw);
+    maxSpeed = Math.max(maxSpeed, speed);
+  }
   if (was === 'running' && run.phase === 'finished') {
-    const r = recordFinish(records, settings.game, map.id, run.time, Date.now());
-    records = r.all;
-    saveRecords(records);
-    announceFinish(r);
-    refreshRecords();
+    if (practice) {
+      surf({ text: `Practice run: ${formatTime(run.time)}. Checkpoints were used, so it isn't saved.`, tone: 'bad' });
+      hud.flash(`Practice: ${formatTime(run.time)}`);
+    } else {
+      const r = recordFinish(records, settings.game, map.id, run.time, Date.now());
+      records = r.all;
+      saveRecords(records);
+      announceFinish(r);
+      refreshRecords();
+      // A new best becomes the ghost you race next time.
+      const g = r.kind !== 'slower' ? ghostFromTicks(recording, tickDt) : null;
+      if (g) saveGhost(settings.game, map.id, (ghost = g));
+    }
   }
 }
 
@@ -334,6 +438,7 @@ function frame(now: number) {
   last = now;
   // Pause while unlocked or hidden; the accumulator was reset on those transitions.
   if (input.locked() && !document.hidden) {
+    if (typing) held.clear();
     if (held.has(0)) renderer.attack('light');
     else if (held.has(2)) renderer.attack('heavy');
     const ticks = acc.advance(dt);
@@ -355,7 +460,10 @@ function frame(now: number) {
   renderer.draw(add(a, scale(sub(b, a), acc.alpha())), yaw, pitch, pose);
   hud.setSpeed(Math.hypot(cur.vel.x, cur.vel.y));
   const pb = best();
-  hud.setTimer(formatTime(run.time), pb === null ? '' : `PB ${formatTime(pb)}`);
+  hud.setTimer(formatTime(run.time), pb === null ? '' : `PB ${formatTime(pb)}`, practice);
+  // The ghost waits at the start, runs alongside yours in time, and parks at the finish.
+  const gt = run.phase === 'running' ? run.time + acc.alpha() / config.tickrate : run.phase === 'finished' ? run.time : 0;
+  renderer.setGhost(settings.showGhost && ghost ? sampleGhost(ghost, gt).pos : null);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
