@@ -286,9 +286,11 @@ export function createRenderer(canvas: HTMLCanvasElement) {
       camera.rotation.x = -pitch * DEG; // Source positive pitch looks down
       renderer.clear();
       renderer.render(scene, camera);
-      renderer.clearDepth();
-      viewmodel.apply(pose);
-      renderer.render(viewmodel.scene, viewmodel.camera);
+      if (!viewmodel.empty()) {
+        renderer.clearDepth();
+        viewmodel.apply(pose);
+        renderer.render(viewmodel.scene, viewmodel.camera);
+      }
     },
     resize,
   };
