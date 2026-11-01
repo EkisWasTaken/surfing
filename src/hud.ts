@@ -39,6 +39,9 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
           <label>Tickrate
             <select name="tickrate"><option value="64">64</option><option value="128">128</option></select>
           </label>
+          <label class="knifePick" hidden>Knife
+            <select name="knife"></select>
+          </label>
           <div class="bind">Jump <button type="button" class="bindBtn"></button></div>
           <label class="check"><input name="autobhop" type="checkbox" /> Auto-bhop (hold jump)</label>
           <label class="check"><input name="showSpeed" type="checkbox" /> Show speed</label>
@@ -80,6 +83,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       tickrate: el.tickrate.value === '128' ? 128 : 64,
       autobhop: el.autobhop.checked,
       showSpeed: el.showSpeed.checked,
+      knife: el.knife.value || cur.knife,
     });
   });
   el.file.addEventListener('change', () => {
@@ -128,6 +132,12 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     setStatus(msg: string, error = false) {
       status.textContent = msg;
       status.classList.toggle('error', error);
+    },
+    // Knives come from the local CS2 import, so the picker only appears once they're known.
+    setKnives(list: { id: string; name: string }[]) {
+      el.knife.replaceChildren(...list.map((k) => new Option(k.name, k.id)));
+      el.knife.value = list.some((k) => k.id === cur.knife) ? cur.knife : (list[0]?.id ?? '');
+      $('.knifePick').hidden = list.length === 0;
     },
     addMap(m: { id: string; name: string }, select = true) {
       if (![...el.map.options].some((o) => o.value === m.id)) el.map.add(new Option(m.name, m.id));

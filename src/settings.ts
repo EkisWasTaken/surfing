@@ -1,8 +1,8 @@
 import { config } from './config';
 
-export type Settings = { sensitivity: number; fov: number; tickrate: 64 | 128; autobhop: boolean; showSpeed: boolean; map: string; jumpBind: string };
+export type Settings = { sensitivity: number; fov: number; tickrate: 64 | 128; autobhop: boolean; showSpeed: boolean; map: string; jumpBind: string; knife: string };
 
-export const defaults: Settings = { sensitivity: 2, fov: 90, tickrate: 64, autobhop: true, showSpeed: true, map: 'sandbox', jumpBind: 'Space' };
+export const defaults: Settings = { sensitivity: 2, fov: 90, tickrate: 64, autobhop: true, showSpeed: true, map: 'sandbox', jumpBind: 'Space', knife: 'knife_default_ct' };
 
 const KEY = 'surf-settings';
 const num = (v: unknown, min: number, max: number, fallback: number) =>
@@ -24,6 +24,7 @@ export function parseSettings(raw: string | null): Settings {
     showSpeed: bool(o.showSpeed, defaults.showSpeed),
     map: typeof o.map === 'string' ? o.map : defaults.map,
     // A KeyboardEvent.code or WheelUp/WheelDown; Escape is reserved for the menu.
+    knife: typeof o.knife === 'string' && /^knife_[a-z0-9_]{1,32}$/.test(o.knife) ? o.knife : defaults.knife, // also a file name: keep it strict
     jumpBind: typeof o.jumpBind === 'string' && /^[A-Za-z0-9]{1,24}$/.test(o.jumpBind) && o.jumpBind !== 'Escape' ? o.jumpBind : defaults.jumpBind,
   };
 }

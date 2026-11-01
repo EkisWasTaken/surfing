@@ -65,6 +65,7 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
   onPlay: input.requestLock,
   onChange(next: Settings) {
     const mapChanged = next.map !== settings.map, tickChanged = next.tickrate !== settings.tickrate;
+    if (next.knife !== settings.knife) loadKnife(next.knife);
     settings = next;
     applySettings(next);
     saveSettings(next);
@@ -120,20 +121,30 @@ async function loadFolderMap(file: string) {
   );
 }
 
-// CS2's knife, decoded by `npm run import-maps` from the local CS2 install (absent → no viewmodel).
-fetch('/cs2/knife.json')
-  .then((r) => (r.ok && r.headers.get('content-type')?.includes('json') ? r.json() : null))
-  .then((j) => j && renderer.setKnife(meshFromJson(j)))
-  .catch(() => {});
-// CS2's arms and first-person knife animations, from the same import.
-fetch('/cs2/viewmodel.json')
-  .then((r) => (r.ok && r.headers.get('content-type')?.includes('json') ? r.json() : null))
-  .then((j) => {
-    if (!j) return;
-    const clips = Object.fromEntries(Object.entries(j.clips as Record<string, { frames: number; duration: number; poses: string }>).map(([k, c]) => [k, { ...c, poses: new Float32Array(unb64(c.poses).buffer) }]));
-    renderer.setArms({ skeleton: j.skeleton, clips, arms: meshFromJson(j.arms) });
-  })
+// CS2's arms and knives, decoded by `npm run import-maps` from the local CS2 install (absent → no viewmodel).
+const json = (url: string) => fetch(url).then((r) => (r.ok && r.headers.get('content-type')?.includes('json') ? r.json() : null));
+type TrackJson = { frames: number; duration: number; poses: string };
+const track = (c: TrackJson) => ({ ...c, poses: new Float32Array(unb64(c.poses).buffer) });
+function loadKnife(id: string) {
+  json(`/cs2/knives/${id}.json`)
+    .then((j) => {
+      if (!j || settings.knife !== id) return; // a newer pick won the race
+      const clips = Object.fromEntries(Object.entries(j.clips as Record<string, TrackJson & { knife: TrackJson | null }>).map(([k, c]) => [k, { ...track(c), knife: c.knife && track(c.knife) }]));
+      renderer.setKnife({ mesh: meshFromJson(j.mesh), skeleton: j.skeleton, clips: clips as Parameters<typeof renderer.setKnife>[0]['clips'] });
+    })
+    .catch((e) => console.warn('knife:', e));
+}
+json('/cs2/viewmodel.json')
+  .then((j) => j && renderer.setArms({ skeleton: j.skeleton, arms: meshFromJson(j.arms) }))
   .catch((e) => console.warn('viewmodel arms:', e));
+json('/cs2/knives/index.json')
+  .then((list: { id: string; name: string }[] | null) => {
+    if (!list?.length) return;
+    hud.setKnives(list);
+    if (!list.some((k) => k.id === settings.knife)) settings = { ...settings, knife: list[0].id };
+    loadKnife(settings.knife);
+  })
+  .catch(() => {});
 
 fetch('/maps/index.json')
   .then((r) => (r.ok ? r.json() : []))

@@ -10,8 +10,11 @@ const DEG = Math.PI / 180;
 const VIEWMODEL_FOV = 68; // CS:GO viewmodel_fov default (horizontal at 4:3)
 const INCH = 0.0254; // Source units → viewmodel metres
 
-export type ViewmodelClip = { frames: number; duration: number; poses: Float32Array };
-export type ViewmodelBundle = { skeleton: NmSkeleton; clips: Record<string, ViewmodelClip>; arms: Cs2Mesh };
+type Track = { frames: number; duration: number; poses: Float32Array };
+// Arms poses (viewmodel skeleton) plus the knife's own bones (its skeleton), sampled on the same clock.
+export type ViewmodelClip = Track & { knife: Track | null };
+export type ArmsBundle = { skeleton: NmSkeleton; arms: Cs2Mesh };
+export type KnifeBundle = { mesh: Cs2Mesh; skeleton: NmSkeleton | null; clips: Record<'draw' | 'idle' | 'lookat01', ViewmodelClip> };
 
 function material(t: Vtex | null, bptc: boolean, metal: number) {
   // BC7 needs EXT_texture_compression_bptc; DXT needs S3TC. Without them the part is drawn untextured.
@@ -43,8 +46,10 @@ const sourceToThree = (o: THREE.Object3D) => {
   return o;
 };
 
-function armsObject(b: ViewmodelBundle, bptc: boolean) {
-  const { names, parents, ref } = b.skeleton;
+// A skinned model driven by an animation skeleton. The model is bound to its own skeleton; each of its bones follows
+// the animation bone of the same name (bones the animation lacks, like twist bones, follow their nearest named parent).
+function skinnedRig(skeleton: NmSkeleton, model: Cs2Mesh, bptc: boolean, metal: number) {
+  const { names, parents, ref } = skeleton;
   const bones = names.map((n) => Object.assign(new THREE.Bone(), { name: n }));
   const root = new THREE.Group();
   bones.forEach((bone, i) => (parents[i] >= 0 ? bones[parents[i]] : root).add(bone));
@@ -55,9 +60,7 @@ function armsObject(b: ViewmodelBundle, bptc: boolean) {
   };
   ref.forEach((r, i) => setPose(r, i));
 
-  // The arms are bound to their own model skeleton; drive each of its bones by the viewmodel bone of the same name
-  // (twist bones the viewmodel skeleton lacks follow their nearest named parent, which they match at bind).
-  const skin = b.arms.skin!;
+  const skin = model.skin!;
   const bind: THREE.Matrix4[] = [];
   skin.bones.forEach((bn, i) => {
     const local = new THREE.Matrix4().compose(new THREE.Vector3(...bn.pos), new THREE.Quaternion(...bn.rot), new THREE.Vector3(1, 1, 1));
@@ -73,16 +76,16 @@ function armsObject(b: ViewmodelBundle, bptc: boolean) {
   const joints = new Uint16Array(skin.joints.length);
   skin.joints.forEach((j, k) => (joints[k] = Math.max(0, names.indexOf(skin.bones[target[j]]?.name ?? ''))));
 
-  const g = geometry(b.arms);
+  const g = geometry(model);
   g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(joints, 4));
   g.setAttribute('skinWeight', new THREE.BufferAttribute(skin.weights, 4));
-  const mesh = new THREE.SkinnedMesh(g, b.arms.groups.map((gr) => material(gr.texture, bptc, 0)));
+  const mesh = new THREE.SkinnedMesh(g, model.groups.map((gr) => material(gr.texture, bptc, metal)));
   mesh.frustumCulled = false; // bind-pose bounds say nothing about the animated pose
   root.add(mesh);
   mesh.bind(new THREE.Skeleton(bones, inverses), new THREE.Matrix4());
 
   const lerp = new Float32Array(8), qa = new THREE.Quaternion(), qb = new THREE.Quaternion();
-  const sample = (c: ViewmodelClip, t: number) => {
+  const sample = (c: Track, t: number) => {
     const x = Math.min(1, Math.max(0, t / c.duration)) * (c.frames - 1), f = Math.min(c.frames - 2, Math.floor(x)), a = x - f;
     for (let i = 0; i < names.length; i++) {
       const o0 = (f * names.length + i) * 8, o1 = o0 + names.length * 8;
@@ -91,7 +94,7 @@ function armsObject(b: ViewmodelBundle, bptc: boolean) {
       setPose(lerp, i);
     }
   };
-  return { root, sample, wpn: bones[names.indexOf('wpn')] };
+  return { root, sample, bone: (n: string) => bones[names.indexOf(n)] };
 }
 
 export function createViewmodel() {
@@ -110,27 +113,31 @@ export function createViewmodel() {
   view.add(hold);
   scene.add(rig);
 
-  let knife: THREE.Object3D | null = null;
-  let arms: (ReturnType<typeof armsObject> & { clips: Record<string, ViewmodelClip> }) | null = null;
-  let anim = { clip: 'draw', start: -1 }; // start < 0: begins on the first drawn frame (after upload/compile stalls)
+  let arms: ReturnType<typeof skinnedRig> | null = null;
+  let knife: { root: THREE.Object3D; rig: ReturnType<typeof skinnedRig> | null; clips: KnifeBundle['clips'] } | null = null;
+  let anim = { clip: 'draw' as keyof KnifeBundle['clips'], start: -1 }; // start < 0: begins on the first drawn frame (after upload/compile stalls)
+  const mount = () => knife && (arms?.bone('wpn') ?? hold).add(knife.root); // weapons ride the viewmodel skeleton's wpn bone
 
   return {
     scene,
     camera,
     empty: () => !knife && !arms,
-    setKnife(mesh: Cs2Mesh, bptc: boolean) {
-      knife?.removeFromParent();
-      knife = new THREE.Mesh(geometry(mesh), mesh.groups.map((g) => material(g.texture, bptc, 0.35)));
-      (arms?.wpn ?? hold).add(knife); // weapons ride the viewmodel skeleton's wpn bone
+    setKnife(b: KnifeBundle, bptc: boolean) {
+      knife?.root.removeFromParent();
+      const r = b.skeleton && b.mesh.skin ? skinnedRig(b.skeleton, b.mesh, bptc, 0.35) : null;
+      const root = r?.root ?? new THREE.Mesh(geometry(b.mesh), b.mesh.groups.map((g) => material(g.texture, bptc, 0.35)));
+      knife = { root, rig: r, clips: b.clips };
+      mount();
+      anim = { clip: 'draw', start: -1 };
     },
-    setArms(b: ViewmodelBundle, bptc: boolean) {
-      arms = { ...armsObject(b, bptc), clips: b.clips };
+    setArms(b: ArmsBundle, bptc: boolean) {
+      arms = skinnedRig(b.skeleton, b.arms, bptc, 0);
       view.add(arms.root);
-      if (knife) arms.wpn.add(knife);
+      mount();
       anim = { clip: 'draw', start: -1 };
     },
     inspect() {
-      if (arms && anim.clip === 'idle') anim = { clip: 'lookat01', start: performance.now() };
+      if (anim.clip === 'idle') anim = { clip: 'lookat01', start: performance.now() };
     },
     resize(aspect: number) {
       camera.aspect = aspect;
@@ -140,12 +147,13 @@ export function createViewmodel() {
     apply(p: Pose) {
       rig.position.set(p.x - p.swayX, p.y - p.swayY, 0);
       rig.rotation.set(p.swayY * 2, p.swayX * 2, 0);
-      if (!arms) return;
+      if (!arms || !knife) return;
       if (anim.start < 0) anim.start = performance.now();
-      const t = (performance.now() - anim.start) / 1000, d = arms.clips[anim.clip].duration;
+      const t = (performance.now() - anim.start) / 1000, d = knife.clips[anim.clip].duration;
       if (anim.clip !== 'idle' && t >= d) anim = { clip: 'idle', start: anim.start + d * 1000 }; // one-shots fall back to idle
-      const c = arms.clips[anim.clip];
-      arms.sample(c, ((performance.now() - anim.start) / 1000) % c.duration);
+      const c = knife.clips[anim.clip], at = ((performance.now() - anim.start) / 1000) % c.duration;
+      arms.sample(c, at);
+      if (c.knife) knife.rig?.sample(c.knife, at);
     },
   };
 }

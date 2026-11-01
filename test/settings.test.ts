@@ -21,4 +21,9 @@ describe('jumpBind', () => {
     expect(parseSettings(JSON.stringify({ jumpBind: 'Escape' })).jumpBind).toBe('Space');
     expect(parseSettings(JSON.stringify({ jumpBind: '<script>' })).jumpBind).toBe('Space');
   });
+  it('keeps a knife id only when it is a plain knife_ name (it becomes a file path)', () => {
+    expect(parseSettings('{"knife":"knife_karambit"}').knife).toBe('knife_karambit');
+    expect(parseSettings('{"knife":"../knife_x"}').knife).toBe(defaults.knife);
+    expect(parseSettings('{"knife":"bayonet"}').knife).toBe(defaults.knife);
+  });
 });
