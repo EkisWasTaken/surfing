@@ -32,6 +32,18 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   root.innerHTML = `
     <div class="flash" role="status" hidden></div>
     <div class="crosshair" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+    <div class="fps" hidden></div>
+    <div class="consoleWrap" hidden>
+      <section class="window console" role="dialog" aria-labelledby="consoleTitle">
+        <header class="titlebar"><h2 id="consoleTitle">Console</h2><span class="gameName">help lists every command</span></header>
+        <div class="consoleLog" role="log" tabindex="0"></div>
+        <form class="consoleForm">
+          <input class="consoleInput" autocomplete="off" spellcheck="false" aria-label="Console command" />
+          <button class="button" type="submit">Submit</button>
+        </form>
+        <p class="consoleHint"></p>
+      </section>
+    </div>
     <div class="chat" aria-live="polite"></div>
     <form class="say" hidden><label for="sayInput">say :</label><input id="sayInput" maxlength="127" autocomplete="off" spellcheck="false" /></form>
     <div class="loading" role="dialog" aria-labelledby="loadingTitle" hidden>
@@ -122,6 +134,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
                 <tr><td>Save checkpoint</td><td>1</td></tr>
                 <tr><td>Teleport to checkpoint (practice)</td><td>2</td></tr>
                 <tr><td>Chat (type !help for commands)</td><td>Y</td></tr>
+                <tr><td>Console (kill, retry, map, bind, sv_ settings: type help)</td><td>` (key under Esc)</td></tr>
                 <tr><td>Open this menu</td><td>Esc</td></tr>
               </tbody>
             </table>
@@ -283,8 +296,80 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   });
   sayInput.addEventListener('blur', closeSay);
 
+  // Console: log + input with history (up/down) and Tab completion; ` or Esc closes it.
+  const conWrap = $('.consoleWrap'), conLog = $('.consoleLog'), conForm = $<HTMLFormElement>('.consoleForm'), conInput = $<HTMLInputElement>('.consoleInput'), conHint = $('.consoleHint');
+  const history: string[] = [];
+  let histAt = 0, onConsoleLine: ((line: string) => void) | null = null, onConsoleClose: (() => void) | null = null, completer: (p: string) => string[] = () => [];
+  const closeConsole = () => {
+    if (conWrap.hidden) return;
+    conWrap.hidden = true;
+    conInput.blur();
+    onConsoleClose?.();
+  };
+  const showHint = () => {
+    const word = conInput.value.trimStart().split(/\s+/)[0] ?? '', hits = word && !conInput.value.includes(' ') ? completer(word) : [];
+    conHint.textContent = hits.length ? hits.slice(0, 8).join('   ') + (hits.length > 8 ? `   (+${hits.length - 8} more)` : '') : '';
+  };
+  conForm.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const line = conInput.value.trim();
+    conInput.value = '';
+    showHint();
+    if (!line) return;
+    if (history.at(-1) !== line) history.push(line);
+    histAt = history.length;
+    conPrint(`] ${line}`, 'echo');
+    onConsoleLine?.(line);
+  });
+  conInput.addEventListener('input', showHint);
+  conInput.addEventListener('keydown', (e) => {
+    e.stopPropagation(); // typed text, not game controls
+    if (e.key === 'Escape' || e.code === 'Backquote' || e.key === '`') {
+      e.preventDefault();
+      closeConsole();
+    } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      e.preventDefault();
+      histAt = Math.max(0, Math.min(history.length, histAt + (e.key === 'ArrowUp' ? -1 : 1)));
+      conInput.value = history[histAt] ?? '';
+    } else if (e.key === 'Tab') {
+      // Complete the command name as far as all matches agree.
+      e.preventDefault();
+      const hits = completer(conInput.value.trim());
+      if (!hits.length || conInput.value.includes(' ')) return;
+      let common = hits[0];
+      for (const h of hits) while (!h.startsWith(common)) common = common.slice(0, -1);
+      conInput.value = hits.length === 1 ? hits[0] + ' ' : common;
+      showHint();
+    }
+  });
+  const conPrint = (text: string, tone?: 'error' | 'dim' | 'echo') => {
+    const line = document.createElement('div');
+    line.textContent = text;
+    if (tone) line.className = tone;
+    conLog.append(line);
+    while (conLog.children.length > 400) conLog.firstElementChild!.remove();
+    conLog.scrollTop = conLog.scrollHeight;
+  };
+
   let flashTimer = 0;
   return {
+    consoleOpen: () => !conWrap.hidden,
+    openConsole(onLine: (line: string) => void, complete: (prefix: string) => string[], onClose: () => void) {
+      onConsoleLine = onLine;
+      completer = complete;
+      onConsoleClose = onClose;
+      conWrap.hidden = false;
+      conInput.focus();
+      conLog.scrollTop = conLog.scrollHeight;
+    },
+    closeConsole,
+    consolePrint: conPrint,
+    consoleClear: () => conLog.replaceChildren(),
+    setFps: (fps: number | null) => {
+      $('.fps').hidden = fps === null;
+      if (fps !== null) $('.fps').textContent = `${Math.round(fps)} fps`;
+    },
+    mapList: () => [...el.map.options].map((o) => ({ id: o.value, name: o.text })),
     // A map id whose name contains the query (chat's !map), preferring an exact name.
     findMap(query: string) {
       const q = query.toLowerCase().trim(), opts = [...el.map.options];

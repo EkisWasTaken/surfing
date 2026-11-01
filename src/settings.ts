@@ -52,7 +52,7 @@ export function saveSettings(s: Settings) {
 
 export function applySettings(s: Settings) {
   config.sensitivity = s.sensitivity;
-  setGameMode(s.game);
+  if (config.mode !== s.game) setGameMode(s.game); // only on a game switch, so console sv_ changes survive other settings changes
   config.tickrate = s.game === 'cs16' ? 100 : s.tickrate; // CS 1.6 moves per frame, at the usual fps_max 100
   config.autobhop = s.autobhop;
 }

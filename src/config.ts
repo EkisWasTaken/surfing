@@ -54,7 +54,12 @@ const MODES: Record<GameMode, Partial<typeof config>> = {
   },
 };
 
+const BASE = { ...config }; // the values before any game mode or console change
+
+// A game's default for one setting (what the console shows as "def.").
+export const modeDefault = <K extends keyof typeof config>(mode: GameMode, key: K): (typeof config)[K] => ((MODES[mode] as Partial<typeof config>)[key] ?? BASE[key]) as (typeof config)[K];
+
 // The game's movement rules; tick rate is the caller's (CS 1.6 movement runs per frame at 100 fps).
 export function setGameMode(mode: GameMode) {
-  Object.assign(config, MODES[mode], { mode });
+  Object.assign(config, { maxspeed: BASE.maxspeed, gravity: BASE.gravity }, MODES[mode], { mode });
 }

@@ -198,3 +198,22 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #2a2f25; }
 .say input { flex: 1; min-width: 0; font: inherit; color: #fff; background: rgb(0 0 0 / 0.35); border: 0; border-bottom: 1px solid var(--chat-text); padding: 2px 4px; outline: none; }
 .say input:focus-visible { background: rgb(0 0 0 / 0.5); }
 .chat .said { color: var(--chat-text); }
+
+/* ---------- Developer console ---------- */
+.consoleWrap { position: absolute; inset: 0; z-index: 3; display: flex; justify-content: center; align-items: flex-start; padding: 6vh 16px 16px; pointer-events: none; }
+.console { pointer-events: auto; width: min(760px, 100%); height: min(62vh, 560px); display: flex; flex-direction: column; }
+.console .titlebar h2 { margin: 0; font: 700 15px/1.2 var(--font-ui); color: var(--text); }
+.consoleLog { flex: 1; margin: 0 12px; padding: 6px 8px; overflow-y: auto; background: var(--well); color: var(--text); font: 12px/1.45 "Lucida Console", Consolas, monospace; white-space: pre-wrap; word-break: break-word;
+  border: 1px solid; border-color: var(--dark) var(--light) var(--light) var(--dark); }
+.consoleLog .echo { color: var(--dim); }
+.consoleLog .dim { color: var(--dim); }
+.consoleLog .error { color: #ffb19e; }
+.consoleForm { display: flex; gap: 8px; margin: 8px 12px 0; }
+.consoleInput { flex: 1; min-width: 0; font: 13px/1.4 "Lucida Console", Consolas, monospace; color: var(--text); background: var(--well); padding: 4px 6px;
+  border: 1px solid; border-color: var(--dark) var(--light) var(--light) var(--dark); outline: none; }
+.consoleInput:focus-visible { outline: 1px dotted var(--text); outline-offset: 1px; }
+.consoleHint { margin: 4px 12px 10px; min-height: 1.4em; color: var(--dim); font: 12px/1.4 "Lucida Console", Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.button:focus-visible { outline: 1px dotted var(--text); outline-offset: -4px; }
+
+/* cl_showfps: top-left, like both games */
+.fps { position: absolute; left: 10px; top: 8px; font: 700 14px/1 var(--font-ui); color: var(--hud); text-shadow: 1px 1px 0 #000; }
