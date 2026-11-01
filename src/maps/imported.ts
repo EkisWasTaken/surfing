@@ -39,6 +39,8 @@ export function bspToMap(bsp: BspMap, fileName: string): MapDef & { goalFromMap:
     endZone: bsp.endZone ?? (saved ? [goalBox(saved)] : null),
     goalFromMap: !!bsp.endZone,
     teleports: bsp.teleports,
+    pushes: bsp.pushes,
+    hurts: bsp.hurts,
     mesh: bsp.mesh,
     props: bsp.props,
     lightmap: bsp.lightmap,

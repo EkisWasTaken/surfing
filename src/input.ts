@@ -78,7 +78,8 @@ export function createInput(canvas: HTMLCanvasElement) {
         side: k('KeyD') - k('KeyA'),
         jump,
         // Not Ctrl: Ctrl+W closes the tab and can't be blocked.
-        duck: keys.has('KeyC') || keys.has('ShiftLeft'),
+        duck: keys.has('KeyC'),
+        walk: keys.has('ShiftLeft') || keys.has('ShiftRight'), // CS:GO: shift walks
         yaw,
         pitch,
       };

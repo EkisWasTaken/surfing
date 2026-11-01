@@ -1,13 +1,14 @@
 import './style.css';
 import { config } from './config';
-import { vec, add, sub, scale } from './math';
+import { vec, add, sub, scale, Vec3 } from './math';
 import type { Brush } from './brush';
 import { maps as builtins, findMap } from './maps';
 import type { MapDef } from './maps';
 import { bspToMap, goalBox, saveGoal } from './maps/imported';
 import { parseBsp } from './bsp';
 import { createGrid } from './grid';
-import { step, newPlayer, unstick, Player } from './movement';
+import { step, newPlayer, unstick, applyPush, Player } from './movement';
+import type { Push } from './bsp';
 import { trace } from './trace';
 import { createAccumulator, tickYaw } from './loop';
 import { createInput } from './input';
@@ -32,6 +33,7 @@ let grid = createGrid(map.brushes);
 let prev: Player, cur: Player;
 let run: Run = newRun();
 let best = loadBest(map.id);
+let inOncePush = new Set<Push>(); // once-pushes touched last tick, so the impulse fires on entry only
 let lastTickYaw = 0; // yaw the previous tick used, for spreading mouse turn across ticks
 
 const touching = (p: Player, zone: Brush[] | null) => {
@@ -118,11 +120,20 @@ function tick(cmd: ReturnType<typeof input.cmd>, tickDt: number) {
   const near = grid.query(sub(cur.pos, vec(r, r, r)), add(cur.pos, vec(r, r, r + 128)));
   prev = cur;
   cur = step(cur, cmd, near, tickDt);
-  if (cur.pos.z < map.killZ || touching(cur, near)) return respawn();
+  if (cur.pos.z < map.killZ || touching(cur, near) || touching(cur, map.hurts)) return respawn();
+  // Boosters: summed base velocity while inside; "once" pushes give one impulse on entry.
+  const inPush = map.pushes.filter((p) => touching(cur, p.brushes));
+  let push: Vec3 | null = null;
+  for (const p of inPush) {
+    if (!p.once) push = add(push ?? vec(), p.vel);
+    else if (!inOncePush.has(p)) cur = { ...cur, vel: add(cur.vel, p.vel) };
+  }
+  inOncePush = new Set(inPush.filter((p) => p.once));
+  cur = applyPush(cur, push, tickDt);
   const tp = map.teleports.find((t) => touching(cur, t.brushes));
   if (tp) {
-    // shortcut: teleports zero velocity (what surf servers do); Source's trigger_teleport keeps it.
-    prev = cur = { ...cur, pos: unstick(tp.dest, grid.query(sub(tp.dest, vec(256, 256, 256)), add(tp.dest, vec(256, 256, 256)))), vel: vec(), onGround: false };
+    // Source's trigger_teleport zeroes velocity (no landmark), so stage resets stop you.
+    prev = cur = { ...newPlayer(unstick(tp.dest, grid.query(sub(tp.dest, vec(256, 256, 256)), add(tp.dest, vec(256, 256, 256))))), ducked: cur.ducked };
     input.setView(tp.yaw, input.view().pitch);
     lastTickYaw = tp.yaw;
   }

@@ -108,3 +108,14 @@ describe('unstick', () => {
     expect(unstick(vec(0, 0, 10), [floor])).toEqual(vec(0, 0, 10));
   });
 });
+
+describe('CS:GO walk and crouch speeds', () => {
+  it('walking (shift) caps at 250 × 0.52', () => {
+    const p = run(grounded(vec(0, 0, 1), [floor]), { ...idle, forward: 1, walk: true }, [floor], 200);
+    expect(Math.hypot(p.vel.x, p.vel.y)).toBeCloseTo(130, 0);
+  });
+  it('crouch-walking caps at 250 × 0.34', () => {
+    const p = run(grounded(vec(0, 0, 1), [floor]), { ...idle, forward: 1, duck: true }, [floor], 200);
+    expect(Math.hypot(p.vel.x, p.vel.y)).toBeCloseTo(85, 0);
+  });
+});

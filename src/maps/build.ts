@@ -1,6 +1,6 @@
 import { Vec3, vec } from '../math';
 import { Brush, makeBox, makeRamp } from '../brush';
-import type { Teleport, BspMap } from '../bsp';
+import type { Teleport, Push, BspMap } from '../bsp';
 
 export type MapDef = {
   id: string;
@@ -12,6 +12,8 @@ export type MapDef = {
   startZone: Brush[];
   endZone: Brush[] | null;
   teleports: Teleport[];
+  pushes: Push[];
+  hurts: Brush[];
   mesh?: BspMap['mesh']; // imported maps render this instead of brushes
   pak?: BspMap['pak'];
   props?: BspMap['props'];
@@ -46,5 +48,7 @@ export function builtin(id: string, name: string, topZ: number, ramps: Brush[], 
     startZone: [makeBox(vec(-256, -256, topZ), vec(256, 256, topZ + 128))],
     endZone: [makeBox(vec(pad.mins.x, pad.mins.y, pad.maxs.z), vec(pad.maxs.x, pad.maxs.y, pad.maxs.z + 128))],
     teleports: [],
+    pushes: [],
+    hurts: [],
   };
 }

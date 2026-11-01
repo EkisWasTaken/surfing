@@ -72,9 +72,34 @@ describe('air movement', () => {
 
   it('fits under a 60u gap only when crouched', () => {
     const map = [floor, makeBox(vec(100, -500, 60), vec(400, 500, 200))];
-    const crouched = run(newPlayer(vec(0, 0, 1)), { ...idle, forward: 1, duck: true }, map, 64);
+    const crouched = run(newPlayer(vec(0, 0, 1)), { ...idle, forward: 1, duck: true }, map, 192) // crouch-walk is 85 u/s;
     expect(crouched.pos.x).toBeGreaterThan(100);
     const standing = run(newPlayer(vec(0, 0, 1)), { ...idle, forward: 1 }, map, 64);
     expect(standing.pos.x).toBeLessThanOrEqual(84);
+  });
+});
+
+import { applyPush } from '../src/movement';
+
+describe('trigger_push base velocity (Source)', () => {
+  it('moves the player by base velocity without changing their own velocity', () => {
+    const p = step({ ...newPlayer(vec(0, 0, 1000)), baseVel: vec(640, 0, 0) }, idle, [], dt);
+    expect(p.pos.x).toBeCloseTo(10, 6);
+    expect(p.vel.x).toBeCloseTo(0, 6);
+  });
+  it('vertical base velocity acts as acceleration', () => {
+    const p = step({ ...newPlayer(vec(0, 0, 1000)), baseVel: vec(0, 0, 1200) }, idle, [], dt);
+    expect(p.vel.z).toBeCloseTo((1200 - 800) / 64, 3);
+  });
+  it('leaving the push folds base velocity into velocity', () => {
+    const p = applyPush({ ...newPlayer(vec(0, 0, 0)), baseVel: vec(500, 0, 0) }, null, dt);
+    expect(p.vel.x).toBeCloseTo(500 * (1 + dt * 0.5), 6);
+    expect(p.baseVel).toEqual(vec(0, 0, 0));
+  });
+  it('an upward push lifts a grounded player off the ground', () => {
+    const p = applyPush({ ...newPlayer(vec(0, 0, 0)), onGround: true }, vec(0, 0, 500), dt);
+    expect(p.onGround).toBe(false);
+    expect(p.pos.z).toBe(1);
+    expect(p.baseVel).toEqual(vec(0, 0, 500));
   });
 });

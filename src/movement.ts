@@ -4,13 +4,17 @@ import { Brush } from './brush';
 import { trace, DIST_EPSILON } from './trace';
 import { config } from './config';
 
-export type Player = { pos: Vec3; vel: Vec3; onGround: boolean; ducked: boolean; groundNormal: Vec3 | null; jumpHeld: boolean };
-export type Cmd = { forward: number; side: number; jump: boolean; duck: boolean; yaw: number; pitch: number };
+// baseVel: velocity from a trigger_push the player is inside (Source's base velocity).
+export type Player = { pos: Vec3; vel: Vec3; onGround: boolean; ducked: boolean; groundNormal: Vec3 | null; jumpHeld: boolean; baseVel: Vec3 };
+export type Cmd = { forward: number; side: number; jump: boolean; duck: boolean; walk?: boolean; yaw: number; pitch: number };
 
 const NON_JUMP_VELOCITY = 140;
 const MAX_CLIP_PLANES = 5;
+// CS:GO CS_PLAYER_SPEED_WALK_MODIFIER / CS_PLAYER_SPEED_DUCK_MODIFIER.
+const WALK_MODIFIER = 0.52;
+const DUCK_MODIFIER = 0.34;
 
-export const newPlayer = (pos: Vec3): Player => ({ pos: copy(pos), vel: vec(), onGround: false, ducked: false, groundNormal: null, jumpHeld: false });
+export const newPlayer = (pos: Vec3): Player => ({ pos: copy(pos), vel: vec(), onGround: false, ducked: false, groundNormal: null, jumpHeld: false, baseVel: vec() });
 
 // Map spawns and teleport destinations often sit exactly on a floor (counts as inside): lift until the hull fits.
 export function unstick(pos: Vec3, brushes: Brush[]): Vec3 {
@@ -32,11 +36,23 @@ type State = Player & { brushes: Brush[]; dt: number };
 const hull = (s: State) => (s.ducked ? config.hullDuck : config.hullStand);
 const traceHull = (s: State, from: Vec3, to: Vec3) => trace(from, to, hull(s).mins, hull(s).maxs, s.brushes);
 
-function wish(cmd: Cmd): { dir: Vec3; speed: number } {
+function wish(cmd: Cmd, s: State): { dir: Vec3; speed: number } {
   const { forward, right } = angleVectors(cmd.yaw, 0);
-  const f = cmd.forward * config.maxspeed, sd = cmd.side * config.maxspeed;
+  const max = config.maxspeed * (cmd.walk ? WALK_MODIFIER : 1) * (s.ducked && s.onGround ? DUCK_MODIFIER : 1);
+  const f = cmd.forward * max, sd = cmd.side * max;
   const v = vec(forward.x * f + right.x * sd, forward.y * f + right.y * sd, 0);
-  return { dir: normalize(v), speed: Math.min(length(v), config.maxspeed) };
+  return { dir: normalize(v), speed: Math.min(length(v), max) };
+}
+
+// Called by the game after each tick with the summed velocity of trigger_push volumes touched (null if none).
+// Mirrors Source: inside, the push is base velocity; leaving folds it into velocity (with the half-frame bonus).
+export function applyPush(p: Player, push: Vec3 | null, dt: number): Player {
+  if (push) {
+    const lift = push.z > 0 && p.onGround; // CTriggerPush lifts grounded players so the push can take effect
+    return { ...p, baseVel: push, onGround: lift ? false : p.onGround, pos: lift ? add(p.pos, vec(0, 0, 1)) : p.pos };
+  }
+  if (!p.baseVel.x && !p.baseVel.y && !p.baseVel.z) return p;
+  return { ...p, vel: add(p.vel, scale(p.baseVel, 1 + dt * 0.5)), baseVel: vec() };
 }
 
 function friction(s: State) {
@@ -158,10 +174,11 @@ function stepMove(s: State) {
 }
 
 function walkMove(s: State, cmd: Cmd) {
-  const w = wish(cmd);
+  const w = wish(cmd, s);
   s.vel.z = 0;
   accelerate(s, w.dir, w.speed, config.accelerate);
   s.vel.z = 0;
+  s.vel = add(s.vel, s.baseVel); // moves with the push, removed again below
   if (length(s.vel) < 1) {
     s.vel = vec();
     return;
@@ -171,12 +188,15 @@ function walkMove(s: State, cmd: Cmd) {
   if (tr.fraction === 1) s.pos = tr.endPos;
   else stepMove(s);
   stayOnGround(s);
+  s.vel = sub(s.vel, s.baseVel);
 }
 
 function airMove(s: State, cmd: Cmd) {
-  const w = wish(cmd);
+  const w = wish(cmd, s);
   airAccelerate(s, w.dir, w.speed);
+  s.vel = add(s.vel, s.baseVel);
   tryPlayerMove(s);
+  s.vel = sub(s.vel, s.baseVel);
 }
 
 function categorizePosition(s: State) {
@@ -219,6 +239,9 @@ export function step(p: Player, cmd: Cmd, brushes: Brush[], dt: number): Player 
 
   duck(s, cmd.duck);
   s.vel.z -= config.gravity * 0.5 * dt;
+  // StartGravity: vertical base velocity is applied as acceleration, then cleared for this tick.
+  s.vel.z += s.baseVel.z * dt;
+  s.baseVel = vec(s.baseVel.x, s.baseVel.y, 0);
   // Without autobhop, jump needs a fresh press (Source m_nOldButtons & IN_JUMP check).
   if (cmd.jump && s.onGround && (config.autobhop || !p.jumpHeld)) {
     s.onGround = false;
@@ -238,5 +261,5 @@ export function step(p: Player, cmd: Cmd, brushes: Brush[], dt: number): Player 
   checkVelocity(s);
   if (s.onGround) s.vel.z = 0;
 
-  return { pos: s.pos, vel: s.vel, onGround: s.onGround, ducked: s.ducked, groundNormal: s.groundNormal, jumpHeld: cmd.jump };
+  return { pos: s.pos, vel: s.vel, onGround: s.onGround, ducked: s.ducked, groundNormal: s.groundNormal, jumpHeld: cmd.jump, baseVel: p.baseVel };
 }
