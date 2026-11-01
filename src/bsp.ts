@@ -158,7 +158,7 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
       while (end < strOfs + strLen && dv.getUint8(end) !== 0) end++;
       return new TextDecoder().decode(new Uint8Array(buffer, start, end - start));
     };
-    const faces = records(L.FACES, 56, (o) => ({ firstedge: i32(o + 4), numedges: i16(o + 8), texinfo: i16(o + 10) }));
+    const faces = records(L.FACES, 56, (o) => ({ plane: u16(o), side: dv.getUint8(o + 2), firstedge: i32(o + 4), numedges: i16(o + 8), texinfo: i16(o + 10) }));
     const pos: number[] = [], col: number[] = [];
     const world = models[0];
     for (let fi = world.firstface; fi < world.firstface + world.numfaces && fi < faces.length; fi++) {
@@ -175,8 +175,14 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
         if (v) poly.push(v);
       }
       const c = td?.color ?? [0.6, 0.6, 0.6];
+      // Wind counter-clockwise around the face's front normal (Source stores faces clockwise).
+      const pn = planes[f.plane]?.normal ?? vec(0, 0, 1);
+      const sign = f.side ? -1 : 1;
       for (let k = 1; k + 1 < poly.length; k++) {
-        for (const v of [poly[0], poly[k], poly[k + 1]]) pos.push(...v), col.push(...c);
+        const [a, b, d] = [poly[0], poly[k], poly[k + 1]];
+        const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = d[0] - a[0], vy = d[1] - a[1], vz = d[2] - a[2];
+        const facing = ((uy * vz - uz * vy) * pn.x + (uz * vx - ux * vz) * pn.y + (ux * vy - uy * vx) * pn.z) * sign;
+        for (const v of facing >= 0 ? [a, b, d] : [a, d, b]) pos.push(...v), col.push(...c);
       }
     }
     return { positions: new Float32Array(pos), colors: new Float32Array(col) };

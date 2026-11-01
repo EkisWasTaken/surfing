@@ -33,3 +33,18 @@ describe('mouseFilter flicks', () => {
     for (const dx of [120, 380, 650, 700, 420]) expect(f(dx, 0)).toEqual([dx, 0]);
   });
 });
+
+import { bindLabel, wheelCode } from '../src/input';
+
+describe('bindings', () => {
+  it('names wheel directions', () => {
+    expect(wheelCode(120)).toBe('WheelDown');
+    expect(wheelCode(-3)).toBe('WheelUp');
+  });
+  it('labels codes readably', () => {
+    expect(bindLabel('Space')).toBe('Space');
+    expect(bindLabel('KeyF')).toBe('F');
+    expect(bindLabel('Digit3')).toBe('3');
+    expect(bindLabel('WheelDown')).toBe('Mouse wheel down');
+  });
+});

@@ -21,10 +21,20 @@ export function mouseFilter(): (dx: number, dy: number) => [number, number] {
   };
 }
 
+export const wheelCode = (deltaY: number) => (deltaY > 0 ? 'WheelDown' : 'WheelUp');
+
+export function bindLabel(code: string): string {
+  if (code === 'WheelDown') return 'Mouse wheel down';
+  if (code === 'WheelUp') return 'Mouse wheel up';
+  return code.replace(/^(Key|Digit)/, '');
+}
+
 export function createInput(canvas: HTMLCanvasElement) {
   const keys = new Set<string>();
   let yaw = 0, pitch = 0;
   let filter = mouseFilter();
+  let jumpBind = 'Space';
+  let jumpPulse = false; // wheel notches are instant, so they count as one tick of jump
   const listeners: ((locked: boolean) => void)[] = [];
   const locked = () => document.pointerLockElement === canvas;
 
@@ -50,21 +60,33 @@ export function createInput(canvas: HTMLCanvasElement) {
   window.addEventListener('keydown', (e) => {
     if (!locked()) return;
     keys.add(e.code);
-    if (e.code === 'Space') e.preventDefault();
+    if (e.code === 'Space' || e.code === jumpBind) e.preventDefault();
   });
   window.addEventListener('keyup', (e) => keys.delete(e.code));
+  document.addEventListener('wheel', (e) => {
+    if (locked() && wheelCode(e.deltaY) === jumpBind) jumpPulse = true;
+  });
 
   const k = (c: string) => (keys.has(c) ? 1 : 0);
   return {
-    cmd: (): Cmd => ({
-      forward: k('KeyW') - k('KeyS'),
-      side: k('KeyD') - k('KeyA'),
-      jump: keys.has('Space'),
-      // Not Ctrl: Ctrl+W closes the tab and can't be blocked.
-      duck: keys.has('KeyC') || keys.has('ShiftLeft'),
-      yaw,
-      pitch,
-    }),
+    // Consumes a pending wheel jump, so call once per batch of ticks.
+    cmd(): Cmd {
+      const jump = keys.has(jumpBind) || jumpPulse;
+      jumpPulse = false;
+      return {
+        forward: k('KeyW') - k('KeyS'),
+        side: k('KeyD') - k('KeyA'),
+        jump,
+        // Not Ctrl: Ctrl+W closes the tab and can't be blocked.
+        duck: keys.has('KeyC') || keys.has('ShiftLeft'),
+        yaw,
+        pitch,
+      };
+    },
+    view: () => ({ yaw, pitch }),
+    setJumpBind(b: string) {
+      jumpBind = b;
+    },
     locked,
     requestLock,
     onLockChange: (cb: (locked: boolean) => void) => listeners.push(cb),

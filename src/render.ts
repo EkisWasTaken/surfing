@@ -13,28 +13,45 @@ const ZENITH = new THREE.Color('#5a8cc2');
 const GROUND = new THREE.Color('#c6a273');
 
 // Triplanar world-space texturing (one texture repeat per `scale` units), sun shading, distance haze.
-function surfaceMaterial(image: HTMLCanvasElement, scale: number) {
-  const map = new THREE.CanvasTexture(image);
-  map.wrapS = map.wrapT = THREE.RepeatWrapping;
-  map.colorSpace = THREE.SRGBColorSpace;
-  map.anisotropy = 8;
+function texture(image: HTMLCanvasElement) {
+  const t = new THREE.CanvasTexture(image);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+
+// Imported maps (`flat` given): steep faces use `image`, floors use `flat`, both tinted by vertex color
+// (the original texture's average color from the BSP).
+function surfaceMaterial(image: HTMLCanvasElement, scale: number, flat?: HTMLCanvasElement) {
   return new THREE.ShaderMaterial({
-    uniforms: { map: { value: map }, scale: { value: scale }, sun: { value: SUN }, haze: { value: HORIZON } },
+    defines: flat ? { BSP: 1 } : {},
+    vertexColors: !!flat,
+    uniforms: { map: { value: texture(image) }, flatMap: { value: texture(flat ?? image) }, scale: { value: scale }, sun: { value: SUN }, haze: { value: HORIZON } },
     vertexShader: /* glsl */ `
-      varying vec3 vWorld; varying vec3 vNormal;
+      varying vec3 vWorld; varying vec3 vNormal; varying vec3 vTint;
       void main() {
         vec4 w = modelMatrix * vec4(position, 1.0);
         vWorld = w.xyz; vNormal = normalize(mat3(modelMatrix) * normal);
+        #ifdef USE_COLOR
+          vTint = color;
+        #else
+          vTint = vec3(1.0);
+        #endif
         gl_Position = projectionMatrix * viewMatrix * w;
       }`,
     fragmentShader: /* glsl */ `
-      uniform sampler2D map; uniform float scale; uniform vec3 sun; uniform vec3 haze;
-      varying vec3 vWorld; varying vec3 vNormal;
+      uniform sampler2D map; uniform sampler2D flatMap; uniform float scale; uniform vec3 sun; uniform vec3 haze;
+      varying vec3 vWorld; varying vec3 vNormal; varying vec3 vTint;
+      vec3 tri(sampler2D t, vec3 p, vec3 w) { return texture2D(t, p.zy).rgb * w.x + texture2D(t, p.xz).rgb * w.y + texture2D(t, p.xy).rgb * w.z; }
       void main() {
         vec3 n = normalize(vNormal);
         vec3 w = pow(abs(n), vec3(4.0)); w /= w.x + w.y + w.z;
         vec3 p = vWorld / scale;
-        vec3 albedo = texture2D(map, p.zy).rgb * w.x + texture2D(map, p.xz).rgb * w.y + texture2D(map, p.xy).rgb * w.z;
+        vec3 albedo = tri(map, p, w);
+        #ifdef BSP
+          albedo = mix(albedo, tri(flatMap, p, w), smoothstep(0.6, 0.8, n.y)) * clamp(vTint * 2.2, 0.35, 1.6);
+        #endif
         float diffuse = max(dot(n, sun), 0.0);
         vec3 color = albedo * (vec3(0.42, 0.38, 0.36) + vec3(1.0, 0.9, 0.75) * diffuse * 0.85);
         float fog = 1.0 - exp(-length(vWorld - cameraPosition) / 24000.0);
@@ -101,6 +118,21 @@ export function rampGeometry(b: Brush): THREE.BufferGeometry {
   return g;
 }
 
+// Source-space triangle soup to three.js space (x, z, -y), flat-shaded.
+function bspGeometry(positions: Float32Array, colors: Float32Array): THREE.BufferGeometry {
+  const p = new Float32Array(positions.length);
+  for (let i = 0; i < p.length; i += 3) {
+    p[i] = positions[i];
+    p[i + 1] = positions[i + 2];
+    p[i + 2] = -positions[i + 1];
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(p, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
 function boxGeometry(b: Brush): THREE.BufferGeometry {
   const g = new THREE.BoxGeometry(b.maxs.x - b.mins.x, b.maxs.z - b.mins.z, b.maxs.y - b.mins.y);
   const c = toThree({ x: (b.mins.x + b.maxs.x) / 2, y: (b.mins.y + b.maxs.y) / 2, z: (b.mins.z + b.maxs.z) / 2 });
@@ -119,6 +151,7 @@ export function createRenderer(canvas: HTMLCanvasElement) {
   camera.rotation.order = 'YXZ';
   const rampMat = surfaceMaterial(sandstone(), 256);
   const floorMat = surfaceMaterial(limestone(), 256);
+  const bspMat = surfaceMaterial(sandstone(), 256, limestone());
   const world = new THREE.Group();
   scene.add(world);
   let hfov = 90;
@@ -133,10 +166,14 @@ export function createRenderer(canvas: HTMLCanvasElement) {
   resize();
 
   return {
-    setMap(brushes: Brush[]) {
+    setMap(map: { brushes: Brush[]; mesh?: { positions: Float32Array; colors: Float32Array } }) {
       for (const m of world.children as THREE.Mesh[]) m.geometry.dispose();
       world.clear();
-      for (const b of brushes) world.add(new THREE.Mesh(b.kind === 'ramp' ? rampGeometry(b) : boxGeometry(b), b.kind === 'ramp' ? rampMat : floorMat));
+      if (map.mesh) {
+        world.add(new THREE.Mesh(bspGeometry(map.mesh.positions, map.mesh.colors), bspMat));
+        return;
+      }
+      for (const b of map.brushes) world.add(new THREE.Mesh(b.kind === 'ramp' ? rampGeometry(b) : boxGeometry(b), b.kind === 'ramp' ? rampMat : floorMat));
     },
     setFov(fov: number) {
       hfov = fov;

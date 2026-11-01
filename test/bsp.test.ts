@@ -61,6 +61,20 @@ describe('parseBsp', () => {
     expect(Array.from(m.mesh.colors.slice(0, 3))).toEqual([0.5, 0.4, 0.3].map((v) => Math.fround(v)));
   });
 
+  it('winds triangles to face along the face plane, even for clockwise (Source-style) faces', () => {
+    const cw = buildBsp({
+      entities,
+      world: [floor],
+      submodels: [],
+      face: [{ verts: [[-512, 512, 0], [512, 512, 0], [512, -512, 0], [-512, -512, 0]], reflectivity: [1, 1, 1], name: 'A', flags: 0, normal: [0, 0, 1] }],
+    });
+    const p = parseBsp(cw, 'cw').mesh.positions;
+    for (let i = 0; i < p.length; i += 9) {
+      const u = [p[i + 3] - p[i], p[i + 4] - p[i + 1]], v = [p[i + 6] - p[i], p[i + 7] - p[i + 1]];
+      expect(u[0] * v[1] - u[1] * v[0]).toBeGreaterThan(0); // normal.z > 0
+    }
+  });
+
   it('rejects non-BSP and compressed files with a clear error', () => {
     expect(() => parseBsp(buildBsp({ entities, world: [floor], submodels: [], ident: 'NOPE' }), 'x')).toThrow(/not a Source BSP/);
     expect(() => parseBsp(buildBsp({ entities, world: [floor], submodels: [], lzmaLump: true }), 'x')).toThrow(/compressed/);

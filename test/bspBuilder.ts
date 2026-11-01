@@ -7,7 +7,7 @@ export function buildBsp(opts: {
   entities: string;
   world: BoxSpec[];
   submodels: BoxSpec[][]; // models 1..n
-  face?: { verts: number[][]; reflectivity: number[]; name: string; flags: number }[];
+  face?: { verts: number[][]; reflectivity: number[]; name: string; flags: number; normal?: number[] }[];
   lzmaLump?: boolean;
   ident?: string;
 }): ArrayBuffer {
@@ -54,7 +54,13 @@ export function buildBsp(opts: {
       surfedges.push(edges.length - 1);
     }
     names.push(f.name);
-    return { firstedge, numedges: f.verts.length, texinfo: names.length - 1 };
+    // Face plane: given, or from the first three verts (counter-clockwise = front).
+    const [a, b, c] = f.verts;
+    const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    const n = f.normal ?? [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+    const len = Math.hypot(n[0], n[1], n[2]);
+    planes.push({ n: n.map((x) => x / len), d: 0 });
+    return { firstedge, numedges: f.verts.length, texinfo: names.length - 1, plane: planes.length - 1 };
   });
   const strData = names.map((n) => n + '\0').join('');
   const strOffsets: number[] = [];
@@ -67,7 +73,7 @@ export function buildBsp(opts: {
     { index: 3, size: 12, count: verts.length, write: (dv, o, i) => verts[i].forEach((v, k) => dv.setFloat32(o + k * 4, v, true)) },
     { index: 5, size: 32, count: models.length, write: (dv, o, i) => { dv.setInt32(o + 4, -(i + 1), true); dv.setInt32(o + 8, -(i + 1), true); } },
     { index: 6, size: 72, count: faces.length, write: (dv, o, i) => { dv.setInt32(o + 64, faces[i].flags, true); dv.setInt32(o + 68, i, true); } },
-    { index: 7, size: 56, count: faceRecs.length, write: (dv, o, i) => { dv.setInt32(o + 4, faceRecs[i].firstedge, true); dv.setInt16(o + 8, faceRecs[i].numedges, true); dv.setInt16(o + 10, faceRecs[i].texinfo, true); dv.setInt16(o + 12, -1, true); } },
+    { index: 7, size: 56, count: faceRecs.length, write: (dv, o, i) => { dv.setUint16(o, faceRecs[i].plane, true); dv.setInt32(o + 4, faceRecs[i].firstedge, true); dv.setInt16(o + 8, faceRecs[i].numedges, true); dv.setInt16(o + 10, faceRecs[i].texinfo, true); dv.setInt16(o + 12, -1, true); } },
     { index: 10, size: 32, count: leafs.length, write: (dv, o, i) => { dv.setInt32(o, 1, true); dv.setUint16(o + 24, leafs[i].first, true); dv.setUint16(o + 26, leafs[i].num, true); } },
     { index: 12, size: 4, count: edges.length, write: (dv, o, i) => { dv.setUint16(o, edges[i][0], true); dv.setUint16(o + 2, edges[i][1], true); } },
     { index: 13, size: 4, count: surfedges.length, write: (dv, o, i) => dv.setInt32(o, surfedges[i], true) },
