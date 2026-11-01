@@ -11,6 +11,7 @@ import { newPlayer, unstick, Player } from './movement';
 import { simTick, touching } from './sim';
 import type { Push } from './bsp';
 import { createAccumulator, tickYaw } from './loop';
+import { newPose, stepPose } from './viewmodelPose';
 import { createInput } from './input';
 import { createRenderer } from './render';
 import { createHud } from './hud';
@@ -35,6 +36,8 @@ let prev: Player, cur: Player;
 let run: Run = newRun();
 let best = loadBest(map.id);
 let inOncePush = new Set<Push>(); // once-pushes touched last tick, so the impulse fires on entry only
+let pose = newPose(); // knife bob/sway
+let lastFrameView = { yaw: 0, pitch: 0 };
 let lastTickYaw = 0; // yaw the previous tick used, for spreading mouse turn across ticks
 
 function respawn() {
@@ -186,7 +189,9 @@ function frame(now: number) {
   // Interpolate the eye point itself so crouch height changes don't snap the camera.
   const a = eye(prev), b = eye(cur);
   const { yaw, pitch } = input.view();
-  renderer.draw(add(a, scale(sub(b, a), acc.alpha())), yaw, pitch);
+  pose = stepPose(pose, { speed: Math.hypot(cur.vel.x, cur.vel.y), onGround: cur.onGround, yawDelta: yaw - lastFrameView.yaw, pitchDelta: pitch - lastFrameView.pitch }, Math.min(dt, 0.1));
+  lastFrameView = { yaw, pitch };
+  renderer.draw(add(a, scale(sub(b, a), acc.alpha())), yaw, pitch, pose);
   hud.setSpeed(Math.hypot(cur.vel.x, cur.vel.y));
   hud.setTimer(formatTime(run.time), best === null ? '' : `PB ${formatTime(best)}`);
   requestAnimationFrame(frame);

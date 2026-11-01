@@ -4,6 +4,8 @@ import type { Vec3 } from './math';
 import { sandstone, limestone } from './textures';
 import { createMaterialSource } from './mapMaterials';
 import { parseModel } from './mdl';
+import { createViewmodel } from './viewmodel';
+import type { Pose } from './viewmodelPose';
 import type { BspMap } from './bsp';
 
 // The only place Source coords (x fwd, y left, z up) become three.js coords (x, y up, z).
@@ -231,9 +233,12 @@ export function createRenderer(canvas: HTMLCanvasElement) {
   scene.add(world);
   let hfov = 90;
 
+  const viewmodel = createViewmodel();
+  renderer.autoClear = false; // world, then the knife on top with only depth cleared
   const resize = () => {
     renderer.setSize(window.innerWidth, window.innerHeight, false);
     camera.aspect = window.innerWidth / window.innerHeight;
+    viewmodel.resize(camera.aspect);
     // CS:GO fov is horizontal at 4:3; wider screens see more to the sides.
     camera.fov = 2 * Math.atan(Math.tan((hfov * DEG) / 2) * 0.75) / DEG;
     camera.updateProjectionMatrix();
@@ -274,12 +279,16 @@ export function createRenderer(canvas: HTMLCanvasElement) {
       hfov = fov;
       resize();
     },
-    draw(eye: Vec3, yaw: number, pitch: number) {
+    draw(eye: Vec3, yaw: number, pitch: number, pose: Pose) {
       camera.position.copy(toThree(eye));
       sky.position.copy(camera.position);
       camera.rotation.y = (yaw - 90) * DEG; // Source yaw 0 = +X; three's camera faces -Z
       camera.rotation.x = -pitch * DEG; // Source positive pitch looks down
+      renderer.clear();
       renderer.render(scene, camera);
+      renderer.clearDepth();
+      viewmodel.apply(pose);
+      renderer.render(viewmodel.scene, viewmodel.camera);
     },
     resize,
   };
