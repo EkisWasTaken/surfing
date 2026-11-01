@@ -5,11 +5,14 @@ import type { Brush, Plane } from './brush';
 import { readZip } from './pak';
 
 export type Teleport = { brushes: Brush[]; dest: Vec3; yaw: number };
+// angles are Source (pitch, yaw, roll) in x, y, z.
+export type StaticProp = { model: string; origin: Vec3; angles: Vec3; skin: number; scale: number };
 export type BspMap = {
   brushes: Brush[];
   // Triangles sorted by texture; each group is one texture's range of vertices.
   mesh: { positions: Float32Array; colors: Float32Array; uvs: Float32Array; groups: { texture: string; start: number; count: number }[] };
-  pak: Map<string, Uint8Array>; // files packed in the map (materials, textures)
+  pak: Map<string, Uint8Array>; // files packed in the map (materials, textures, models)
+  props: StaticProp[];
   spawn: Vec3;
   spawnYaw: number;
   teleports: Teleport[];
@@ -18,7 +21,7 @@ export type BspMap = {
   killZ: number;
 };
 
-const L = { PAKFILE: 40, ENTITIES: 0, PLANES: 1, TEXDATA: 2, VERTEXES: 3, NODES: 5, TEXINFO: 6, FACES: 7, LEAFS: 10, EDGES: 12, SURFEDGES: 13, MODELS: 14, LEAFBRUSHES: 17, BRUSHES: 18, BRUSHSIDES: 19, TEXSTR_DATA: 43, TEXSTR_TABLE: 44 };
+const L = { GAME: 35, PAKFILE: 40, ENTITIES: 0, PLANES: 1, TEXDATA: 2, VERTEXES: 3, NODES: 5, TEXINFO: 6, FACES: 7, LEAFS: 10, EDGES: 12, SURFEDGES: 13, MODELS: 14, LEAFBRUSHES: 17, BRUSHES: 18, BRUSHSIDES: 19, TEXSTR_DATA: 43, TEXSTR_TABLE: 44 };
 // MASK_PLAYERSOLID: solid | window | grate | playerclip | monster.
 const PLAYER_SOLID = 0x1 | 0x2 | 0x8 | 0x10000 | 0x2000000;
 // sky2d | sky | trigger | nodraw | hint | skip
@@ -139,6 +142,7 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
   return {
     brushes: modelBrushes(0, PLAYER_SOLID),
     mesh: readFaces(),
+    props: readProps(),
     pak: (() => {
       const { ofs, len } = lump(L.PAKFILE);
       return readZip(new Uint8Array(buffer, ofs, len));
@@ -150,6 +154,47 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
     endZone: zone(/end|finish/i),
     killZ: models[0].minZ - 1000,
   };
+
+  // Static props live in the 'sprp' game lump. Entry size varies by version, so derive it from the lump length.
+  function readProps(): StaticProp[] {
+    const { ofs, len } = lump(L.GAME);
+    if (len < 4) return [];
+    const count = i32(ofs);
+    for (let i = 0; i < count && ofs + 4 + i * 16 + 16 <= ofs + len; i++) {
+      const e = ofs + 4 + i * 16;
+      if (i32(e) !== 0x73707270) continue;
+      let p = i32(e + 8);
+      const end = p + i32(e + 12);
+      // Compressed game lumps (flag 1) aren't supported; the map still loads without props.
+      if (dv.getUint16(e + 4, true) & 1 || p < 0 || end > buffer.byteLength || end - p < 12) return [];
+      const dict = i32(p);
+      p += 4;
+      const names: string[] = [];
+      for (let k = 0; k < dict && p + 128 <= end; k++, p += 128) {
+        const raw = new Uint8Array(buffer, p, 128);
+        names.push(new TextDecoder().decode(raw.subarray(0, Math.max(0, raw.indexOf(0)) || 128)).toLowerCase().replace(/\\/g, '/'));
+      }
+      p += 4 + i32(p) * 2; // leaf list
+      const n = i32(p);
+      p += 4;
+      const size = n > 0 ? Math.floor((end - p) / n) : 0;
+      if (size < 56) return [];
+      const out: StaticProp[] = [];
+      for (let k = 0; k < n; k++, p += size) {
+        const model = names[u16(p + 24)];
+        if (!model) continue;
+        out.push({
+          model,
+          origin: vec(f32(p), f32(p + 4), f32(p + 8)),
+          angles: vec(f32(p + 12), f32(p + 16), f32(p + 20)),
+          skin: i32(p + 32),
+          scale: size >= 80 ? f32(p + 76) || 1 : 1,
+        });
+      }
+      return out;
+    }
+    return [];
+  }
 
   function readFaces() {
     const verts = records(L.VERTEXES, 12, (o) => [f32(o), f32(o + 4), f32(o + 8)]);

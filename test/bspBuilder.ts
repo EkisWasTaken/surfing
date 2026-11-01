@@ -10,6 +10,8 @@ export function buildBsp(opts: {
   face?: { verts: number[][]; reflectivity: number[]; name: string; flags: number; normal?: number[] }[];
   lzmaLump?: boolean;
   ident?: string;
+  // Static props game lump ('sprp'), version 10 (76-byte entries) or 11 (80, with scale).
+  staticProps?: { version: 10 | 11; models: string[]; props: { origin: number[]; angles: number[]; model: number; skin?: number; scale?: number }[] };
 }): ArrayBuffer {
   const planes: { n: number[]; d: number }[] = [];
   const brushes: { first: number; num: number; contents: number }[] = [];
@@ -82,6 +84,7 @@ export function buildBsp(opts: {
     { index: 18, size: 12, count: brushes.length, write: (dv, o, i) => { dv.setInt32(o, brushes[i].first, true); dv.setInt32(o + 4, brushes[i].num, true); dv.setInt32(o + 8, brushes[i].contents, true); } },
     { index: 19, size: 8, count: sides.length, write: (dv, o, i) => dv.setUint16(o, sides[i], true) },
     { index: 43, bytes: new TextEncoder().encode(strData) },
+    { index: 35, bytes: gameLump(opts.staticProps) },
     { index: 44, size: 4, count: strOffsets.length, write: (dv, o, i) => dv.setInt32(o, strOffsets[i], true) },
   ];
 
@@ -99,8 +102,39 @@ export function buildBsp(opts: {
     dv.setInt32(8 + l.index * 16 + 4, sizes[k], true);
     if ('bytes' in l) new Uint8Array(buf, off, l.bytes.length).set(l.bytes);
     else for (let i = 0; i < l.count; i++) l.write(dv, off + i * l.size, i);
+    // Game lump entries point at absolute file offsets; the sprp data follows the 20-byte directory.
+    if (l.index === 35 && opts.staticProps) dv.setInt32(off + 12, off + 20, true);
     if (opts.lzmaLump && l.index === 1) 'LZMA'.split('').forEach((c, j) => dv.setUint8(off + j, c.charCodeAt(0)));
     off += sizes[k];
   });
   return buf;
+}
+
+function gameLump(sp?: { version: 10 | 11; models: string[]; props: { origin: number[]; angles: number[]; model: number; skin?: number; scale?: number }[] }): Uint8Array {
+  if (!sp) return new Uint8Array(4); // zero game lumps
+  const size = sp.version === 11 ? 80 : 76;
+  const dataLen = 4 + sp.models.length * 128 + 4 + 4 + sp.props.length * size;
+  const out = new Uint8Array(20 + dataLen);
+  const dv = new DataView(out.buffer);
+  dv.setInt32(0, 1, true);
+  dv.setInt32(4, 0x73707270, true); // 'sprp'
+  dv.setUint16(10, sp.version, true);
+  dv.setInt32(16, dataLen, true);
+  let p = 20;
+  dv.setInt32(p, sp.models.length, true);
+  p += 4;
+  for (const m of sp.models) out.set(new TextEncoder().encode(m), p), (p += 128);
+  dv.setInt32(p, 0, true); // no leaves
+  p += 4;
+  dv.setInt32(p, sp.props.length, true);
+  p += 4;
+  for (const pr of sp.props) {
+    pr.origin.forEach((v, k) => dv.setFloat32(p + k * 4, v, true));
+    pr.angles.forEach((v, k) => dv.setFloat32(p + 12 + k * 4, v, true));
+    dv.setUint16(p + 24, pr.model, true);
+    dv.setInt32(p + 32, pr.skin ?? 0, true);
+    if (size === 80) dv.setFloat32(p + 76, pr.scale ?? 1, true);
+    p += size;
+  }
+  return out;
 }

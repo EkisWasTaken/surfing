@@ -98,3 +98,21 @@ describe('spawn entity types', () => {
     expect(m.spawnYaw).toBe(270);
   });
 });
+
+describe('static props', () => {
+  it.each([10, 11] as const)('reads sprp v%i: model, origin, angles, skin, scale', (version) => {
+    const m = parseBsp(
+      buildBsp({
+        entities,
+        world: [floor],
+        submodels: [],
+        staticProps: { version, models: ['models/rock/Rock01.mdl', 'models/tree.mdl'], props: [{ origin: [10, 20, 30], angles: [0, 90, 0], model: 1, skin: 2, scale: 1.5 }] },
+      }),
+      'p',
+    );
+    expect(m.props).toEqual([{ model: 'models/tree.mdl', origin: { x: 10, y: 20, z: 30 }, angles: { x: 0, y: 90, z: 0 }, skin: 2, scale: version === 11 ? 1.5 : 1 }]);
+  });
+  it('maps with no props give an empty list', () => {
+    expect(parseBsp(file(), 't').props).toEqual([]);
+  });
+});
