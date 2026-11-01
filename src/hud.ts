@@ -9,64 +9,98 @@ type HudOptions = {
   onLoadFile: (file: File) => void;
 };
 
+// Small HUD glyphs, drawn in the HUD colour (currentColor).
+const ICON = {
+  speed: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 7h9l-3-4h4l6 7-6 7H8l3-4H2z" fill="currentColor"/><path d="M14 7h3l6 5-6 5h-3l6-5z" fill="currentColor" opacity=".55"/></svg>',
+  clock: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 1h6v2.2A9.5 9.5 0 1 1 9 3.2zm3 5a7.5 7.5 0 1 0 0 15 7.5 7.5 0 0 0 0-15zm-1 2h2v5.4l3.6 2.1-1 1.7-4.6-2.7z" fill="currentColor" fill-rule="evenodd"/></svg>',
+  flag: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 2h2v20H4zm3 1h13l-3 5 3 5H7z" fill="currentColor"/></svg>',
+};
+const TABS = [
+  { id: 'map', name: 'Map' },
+  { id: 'movement', name: 'Movement' },
+  { id: 'knife', name: 'Knife' },
+  { id: 'controls', name: 'Controls' },
+];
+
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 export function createHud(root: HTMLElement, opts: HudOptions) {
   let cur = opts.settings;
+  // HUD after CS 1.6's bottom bar: speed where health was, the run timer where the round timer was, PB where money was.
   root.innerHTML = `
-    <div class="timer"><span class="time">0:00.000</span><span class="best"></span></div>
-    <div class="flash" hidden></div>
-    <div class="crosshair"></div>
-    <div class="speed">0</div>
+    <div class="flash" role="status" hidden></div>
+    <div class="crosshair" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+    <div class="hudbar">
+      <div class="hudItem speed" aria-label="Speed">${ICON.speed}<span class="speedVal">0</span><small>u/s</small></div>
+      <div class="hudItem timer" aria-label="Run time">${ICON.clock}<span class="time">0:00.000</span></div>
+      <div class="hudItem best" aria-label="Personal best" hidden>${ICON.flag}<span class="bestVal"></span></div>
+    </div>
     <div class="overlay">
-      <div class="panel">
-        <h1>Surf Sandbox</h1>
-        <button class="play" type="button">Play</button>
+      <section class="window" role="dialog" aria-labelledby="windowTitle">
+        <header class="titlebar"><h1 id="windowTitle">Surf Sandbox</h1><span class="gameName"></span></header>
+        <div class="tabs" role="tablist" aria-label="Menu sections">
+          ${TABS.map((t) => `<button type="button" role="tab" id="tab-${t.id}" aria-controls="sheet-${t.id}" data-tab="${t.id}">${t.name}</button>`).join('')}
+        </div>
         <form class="options">
-          <label>Map
-            <select name="map">${opts.maps.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('')}</select>
-          </label>
-          <div class="load">
-            <label class="file">Load CS:GO map (.bsp)…<input name="file" type="file" accept=".bsp" /></label>
+          <div class="sheet" role="tabpanel" id="sheet-map" aria-labelledby="tab-map">
+            <label class="row"><span>Map</span>
+              <select name="map">${opts.maps.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('')}</select>
+            </label>
+            <div class="row"><span>Your own map</span>
+              <label class="button file">Load .bsp file…<input name="file" type="file" accept=".bsp" /></label>
+            </div>
             <p class="status" role="status"></p>
           </div>
-          <label>Sensitivity <span class="hint">(CS:GO scale)</span>
-            <input name="sensitivity" type="number" min="0.01" max="20" step="0.01" />
-          </label>
-          <label>FOV <output name="fovOut"></output>
-            <input name="fov" type="range" min="60" max="130" step="1" />
-          </label>
-          <label>Game <span class="hint">(movement + viewmodel)</span>
-            <select name="game"><option value="csgo">CS:GO</option><option value="cs16">CS 1.6</option></select>
-          </label>
-          <label>Tickrate <span class="hint tickHint"></span>
-            <select name="tickrate"><option value="64">64</option><option value="128">128</option></select>
-          </label>
-          <div class="cs2Only">
-          <label class="knifePick" hidden>Knife
-            <select name="knife"></select>
-          </label>
-          <div class="finishOpts" hidden>
-            <label>Finish
-              <select name="finish"></select>
+          <div class="sheet" role="tabpanel" id="sheet-movement" aria-labelledby="tab-movement" hidden>
+            <label class="row"><span>Game</span>
+              <select name="game"><option value="csgo">CS:GO</option><option value="cs16">CS 1.6</option></select>
             </label>
-            <label>Wear <output name="wearOut"></output>
-              <input name="wear" type="range" min="0" max="1" step="0.001" />
+            <p class="note">Switches movement rules, knife and HUD together. Changing it restarts your run.</p>
+            <label class="row"><span>Tickrate</span>
+              <select name="tickrate"><option value="64">64</option><option value="128">128</option></select>
             </label>
-            <label>Pattern seed <span class="hint">(0–1000)</span>
-              <input name="seed" type="number" min="0" max="1000" step="1" />
+            <p class="note tickHint"></p>
+            <label class="row"><span>Mouse sensitivity</span><input name="sensitivity" type="number" min="0.01" max="20" step="0.01" /></label>
+            <label class="row"><span>Field of view</span>
+              <span class="slider"><input name="fov" type="range" min="60" max="130" step="1" /><output name="fovOut"></output></span>
             </label>
+            <label class="row check"><input name="autobhop" type="checkbox" /><span>Jump again automatically while holding jump</span></label>
+            <label class="row check"><input name="showSpeed" type="checkbox" /><span>Show speed on the HUD</span></label>
           </div>
+          <div class="sheet" role="tabpanel" id="sheet-knife" aria-labelledby="tab-knife" hidden>
+            <p class="note noKnives">Knives appear after running <code>npm run import-maps</code> with CS2 installed.</p>
+            <label class="row knifePick" hidden><span>Knife</span><select name="knife"></select></label>
+            <div class="finishOpts" hidden>
+              <label class="row"><span>Finish</span><select name="finish"></select></label>
+              <label class="row"><span>Wear</span>
+                <span class="slider"><input name="wear" type="range" min="0" max="1" step="0.001" /><output name="wearOut"></output></span>
+              </label>
+              <label class="row"><span>Pattern seed</span><input name="seed" type="number" min="0" max="1000" step="1" /></label>
+            </div>
           </div>
-          <div class="bind">Jump <button type="button" class="bindBtn"></button></div>
-          <label class="check"><input name="autobhop" type="checkbox" /> Auto-bhop (hold jump)</label>
-          <label class="check"><input name="showSpeed" type="checkbox" /> Show speed</label>
+          <div class="sheet" role="tabpanel" id="sheet-controls" aria-labelledby="tab-controls" hidden>
+            <table class="keylist">
+              <thead><tr><th scope="col">Action</th><th scope="col">Key</th></tr></thead>
+              <tbody>
+                <tr><td>Move</td><td>W A S D</td></tr>
+                <tr><td>Jump</td><td><button type="button" class="bindBtn" title="Click, then press a key or scroll"></button></td></tr>
+                <tr><td>Walk</td><td>Shift</td></tr>
+                <tr><td>Crouch</td><td>C</td></tr>
+                <tr><td>Slash</td><td>Left click</td></tr>
+                <tr><td>Stab</td><td>Right click</td></tr>
+                <tr class="cs2Only"><td>Inspect knife</td><td>F</td></tr>
+                <tr><td>Mark the finish (maps without one)</td><td>F</td></tr>
+                <tr><td>Restart run</td><td>R</td></tr>
+                <tr><td>Open this menu</td><td>Esc</td></tr>
+              </tbody>
+            </table>
+          </div>
         </form>
-        <p class="keys">WASD move · Mouse look · Left click slash · Right click stab · F inspect (or set goal on imported maps) · Shift walk · C crouch · R restart · Esc menu</p>
-      </div>
+        <footer class="buttons"><button class="play" type="button">Play</button></footer>
+      </section>
     </div>`;
   const $ = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel)!;
-  const speed = $('.speed'), overlay = $('.overlay'), status = $('.status'), bindBtn = $<HTMLButtonElement>('.bindBtn');
+  const speed = $('.speed'), speedVal = $('.speedVal'), bestVal = $('.bestVal'), overlay = $('.overlay'), status = $('.status'), bindBtn = $<HTMLButtonElement>('.bindBtn');
   const time = $('.time'), best = $('.best'), flash = $('.flash');
   const form = $<HTMLFormElement>('.options');
   const el = form.elements as unknown as Record<string, HTMLInputElement & HTMLSelectElement & HTMLOutputElement>;
@@ -77,18 +111,53 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   el.fovOut.value = String(cur.fov);
   el.tickrate.value = String(cur.tickrate);
   el.game.value = cur.game;
+  // The whole UI wears the chosen game's look: CS 1.6 VGUI or CS:GO.
   const showGame = () => {
+    root.dataset.game = cur.game;
+    $('.gameName').textContent = cur.game === 'cs16' ? 'Counter-Strike 1.6' : 'CS:GO';
     el.tickrate.disabled = cur.game === 'cs16';
-    $('.tickHint').textContent = cur.game === 'cs16' ? '(CS 1.6 runs at 100 fps)' : '';
-    $('.cs2Only').hidden = cur.game === 'cs16'; // CS 1.6 has one knife, no skins
+    $('.tickHint').textContent = cur.game === 'cs16' ? 'CS 1.6 moves once per frame, at 100 fps.' : '';
+    $('.tickHint').hidden = cur.game !== 'cs16';
+    // CS 1.6 has one knife and no skins, and no inspect.
+    root.querySelectorAll<HTMLElement>('.cs2Only').forEach((e) => (e.hidden = cur.game === 'cs16'));
+    $('#tab-knife').hidden = cur.game === 'cs16';
+    if (cur.game === 'cs16' && tab === 'knife') selectTab('map');
   };
+  // Tabs: click or arrow keys; the open tab is remembered on this device.
+  const tabButtons = [...root.querySelectorAll<HTMLButtonElement>('[role=tab]')];
+  let tab = 'map';
+  const selectTab = (id: string, focus = false) => {
+    tab = id;
+    for (const b of tabButtons) {
+      const on = b.dataset.tab === id;
+      b.setAttribute('aria-selected', String(on));
+      b.tabIndex = on ? 0 : -1;
+      if (on && focus) b.focus();
+    }
+    root.querySelectorAll<HTMLElement>('.sheet').forEach((p) => (p.hidden = p.id !== `sheet-${id}`));
+    try {
+      localStorage.setItem('surf-menu-tab', id);
+    } catch {}
+  };
+  tabButtons.forEach((b) => b.addEventListener('click', () => selectTab(b.dataset.tab!)));
+  $('.tabs').addEventListener('keydown', (e) => {
+    const shown = tabButtons.filter((b) => !b.hidden), i = shown.findIndex((b) => b.dataset.tab === tab);
+    const next = e.key === 'ArrowRight' ? shown[(i + 1) % shown.length] : e.key === 'ArrowLeft' ? shown[(i - 1 + shown.length) % shown.length] : null;
+    if (next) (e.preventDefault(), selectTab(next.dataset.tab!, true));
+  });
+  let saved: string | null = null;
+  try {
+    saved = localStorage.getItem('surf-menu-tab');
+  } catch {}
+  selectTab(TABS.some((t) => t.id === saved) ? saved! : 'map');
   showGame();
   el.autobhop.checked = cur.autobhop;
   el.showSpeed.checked = cur.showSpeed;
   el.wear.value = String(cur.wear);
   el.seed.value = String(cur.seed);
-  const wearLabel = (w: number) => `${w.toFixed(3)} · ${w < 0.07 ? 'Factory New' : w < 0.15 ? 'Minimal Wear' : w < 0.38 ? 'Field-Tested' : w < 0.45 ? 'Well-Worn' : 'Battle-Scarred'}`;
+  const wearLabel = (w: number) => `${w.toFixed(3)}, ${w < 0.07 ? 'Factory New' : w < 0.15 ? 'Minimal Wear' : w < 0.38 ? 'Field-Tested' : w < 0.45 ? 'Well-Worn' : 'Battle-Scarred'}`;
   el.wearOut.value = wearLabel(cur.wear);
+  el.fovOut.value = String(cur.fov);
   bindBtn.textContent = bindLabel(cur.jumpBind);
   speed.hidden = !cur.showSpeed;
 
@@ -151,11 +220,12 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
 
   let flashTimer = 0;
   return {
-    setSpeed: (u: number) => (speed.textContent = String(Math.round(u))),
+    setSpeed: (u: number) => (speedVal.textContent = String(Math.round(u))),
     showOverlay: (show: boolean) => (overlay.hidden = !show),
     setTimer(t: string, bestText: string) {
       time.textContent = t;
-      best.textContent = bestText;
+      bestVal.textContent = bestText.replace(/^PB /, '');
+      best.hidden = !bestText;
     },
     flash(msg: string) {
       flash.textContent = msg;
@@ -172,6 +242,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       el.knife.replaceChildren(...list.map((k) => new Option(k.name, k.id)));
       el.knife.value = list.some((k) => k.id === cur.knife) ? cur.knife : (list[0]?.id ?? '');
       $('.knifePick').hidden = list.length === 0;
+      $('.noKnives').hidden = list.length > 0;
     },
     // The current knife's finishes; the controls hide for knives without any (default knives).
     setFinishes(list: { id: string; name: string }[]) {

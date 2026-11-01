@@ -1,35 +1,149 @@
-html, body { margin: 0; height: 100%; overflow: hidden; background: #1a140d; font-family: system-ui, sans-serif; color: #fff; }
+/* Two looks, picked by the Game setting (#hud[data-game]):
+   CS 1.6: Steam's olive VGUI windows (bevelled edges, Tahoma, khaki selection) and the orange HUD.
+   CS:GO: slate panels, cool blue selection, white HUD figures. */
+:root {
+  --font-ui: Tahoma, Verdana, "Segoe UI", sans-serif;
+  --font-hud: "Arial Black", "Arial Bold", Gadget, sans-serif;
+}
+#hud,
+#hud[data-game="cs16"] {
+  --panel: #4c5844;
+  --well: #3e4637;
+  --light: #8c9480;
+  --dark: #282e22;
+  --text: #dedfd6;
+  --dim: #a0aa95;
+  --select: #958831;
+  --select-text: #fff;
+  --hud: rgb(255 160 0 / 0.92);
+  --hud-glow: rgb(255 120 0 / 0.45);
+  --cross: #32fa32;
+  --radius: 0;
+}
+#hud[data-game="csgo"] {
+  --panel: #2b3038;
+  --well: #1f232a;
+  --light: #4a515d;
+  --dark: #15181d;
+  --text: #e4e6ea;
+  --dim: #9aa2ae;
+  --select: #3d6fb4;
+  --select-text: #fff;
+  --hud: rgb(240 242 245 / 0.95);
+  --hud-glow: rgb(0 0 0 / 0.6);
+  --cross: #3cff3c;
+  --radius: 2px;
+}
+
+html, body { margin: 0; height: 100%; overflow: hidden; background: #2a2f25; }
 #game { display: block; width: 100vw; height: 100vh; }
-#hud { position: fixed; inset: 0; pointer-events: none; }
-.crosshair { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px; border-radius: 50%; background: #7CFC00; box-shadow: 0 0 2px #000; }
-.speed { position: absolute; left: 50%; bottom: 18%; transform: translateX(-50%); font-size: 48px; font-weight: 700; font-variant-numeric: tabular-nums; text-shadow: 0 2px 6px #000a; }
-.speed[hidden] { display: none; }
-.overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #1a120899; padding: 16px; pointer-events: auto; overflow-y: auto; }
-.overlay[hidden] { display: none; }
-.panel { width: min(420px, 100%); background: #2a1f14ee; border: 1px solid #6b5333; border-radius: 10px; padding: 24px; box-shadow: 0 12px 40px #0008; }
-.panel h1 { margin: 0 0 16px; font-size: 32px; letter-spacing: .02em; color: #f3d9a4; }
-.play { width: 100%; padding: 12px; font: inherit; font-size: 18px; font-weight: 700; color: #1a120a; background: #e8b55a; border: 0; border-radius: 6px; cursor: pointer; }
-.play:hover { background: #f2c470; }
-.play:focus-visible, .options :focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
-.options { display: grid; gap: 12px; margin: 20px 0 12px; }
-.options label { display: grid; gap: 4px; font-size: 14px; color: #e8dcc6; }
-.options label.check { display: flex; align-items: center; gap: 8px; }
-.options input[type=number], .options select { font: inherit; padding: 6px 8px; color: #fff; background: #1a130b; border: 1px solid #6b5333; border-radius: 4px; }
-.options input[type=range] { width: 100%; accent-color: #e8b55a; }
-.options input[type=checkbox] { accent-color: #e8b55a; width: 16px; height: 16px; }
-.hint { opacity: .6; font-size: 12px; }
-.keys { margin: 0; opacity: .7; font-size: 12px; text-align: center; }
-.timer { position: absolute; left: 50%; top: 24px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; font-variant-numeric: tabular-nums; text-shadow: 0 2px 6px #000a; }
-.timer .time { font-size: 32px; font-weight: 700; }
-.timer .best { font-size: 14px; opacity: .8; }
-.flash { position: absolute; left: 50%; top: 30%; transform: translateX(-50%); padding: 10px 18px; font-size: 24px; font-weight: 700; background: #2a1f14dd; border: 1px solid #e8b55a; border-radius: 8px; }
-.flash[hidden] { display: none; }
-.load { display: grid; gap: 4px; }
-.file { display: block; padding: 8px; text-align: center; border: 1px dashed #6b5333; border-radius: 4px; cursor: pointer; color: #f3d9a4; }
-.file:focus-within { outline: 2px solid #fff; outline-offset: 2px; }
+#hud { position: fixed; inset: 0; pointer-events: none; font: 13px/1.4 var(--font-ui); color: var(--text); }
+[hidden] { display: none !important; }
+
+/* ---------- HUD ---------- */
+.crosshair { position: absolute; left: 50%; top: 50%; width: 0; height: 0; }
+.crosshair i { position: absolute; background: var(--cross); box-shadow: 0 0 1px #000a; }
+.crosshair i:nth-child(1) { left: -1px; top: -13px; width: 2px; height: 8px; }
+.crosshair i:nth-child(2) { left: -1px; top: 5px; width: 2px; height: 8px; }
+.crosshair i:nth-child(3) { top: -1px; left: -13px; width: 8px; height: 2px; }
+.crosshair i:nth-child(4) { top: -1px; left: 5px; width: 8px; height: 2px; }
+
+.hudbar { position: absolute; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: 1fr auto 1fr; align-items: end; padding: 0 28px 18px; }
+.hudItem { display: flex; align-items: center; gap: 8px; color: var(--hud); font: 900 34px/1 var(--font-hud); font-variant-numeric: tabular-nums; letter-spacing: 0.02em; text-shadow: 0 0 6px var(--hud-glow); }
+.hudItem svg { width: 30px; height: 30px; flex: none; filter: drop-shadow(0 0 4px var(--hud-glow)); }
+.hudItem small { font-size: 15px; letter-spacing: 0; opacity: 0.8; align-self: flex-end; margin-bottom: 3px; }
+.speed { justify-self: start; }
+.timer { justify-self: center; }
+.best { justify-self: end; font-size: 24px; }
+.best svg { width: 22px; height: 22px; }
+/* CS:GO's HUD sits in dark translucent strips instead of glowing on the scene. */
+#hud[data-game="csgo"] .hudItem { padding: 6px 12px; background: linear-gradient(90deg, rgb(0 0 0 / 0.55), rgb(0 0 0 / 0.25)); font-family: var(--font-ui); font-weight: 700; text-shadow: none; }
+#hud[data-game="csgo"] .hudItem svg { filter: none; }
+
+/* CS 1.6 centre-print: plain text over the scene, no box. */
+.flash { position: absolute; left: 50%; top: 28%; transform: translateX(-50%); max-width: calc(100% - 32px); text-align: center; font: 700 22px/1.3 var(--font-ui); color: #fff; text-shadow: 1px 1px 0 #000, 0 0 8px #000c; }
+#hud[data-game="cs16"] .flash { color: #ffde6a; }
+
+/* ---------- Menu window ---------- */
+.overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgb(14 17 12 / 0.55); pointer-events: auto; overflow-y: auto; }
+
+/* Bevels: raised = light top-left, dark bottom-right; sunken = the reverse. */
+.window, .tabs [aria-selected="true"], .button, .play, .bindBtn, input[type="range"]::-webkit-slider-thumb {
+  border: 1px solid; border-color: var(--light) var(--dark) var(--dark) var(--light);
+}
+.window { width: min(560px, 100%); background: var(--panel); box-shadow: 0 0 0 1px #0008, 0 18px 50px #0009; border-radius: var(--radius); }
+.titlebar { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 10px 14px 6px; }
+.titlebar h1 { margin: 0; font: 700 20px/1.2 var(--font-ui); color: var(--text); }
+.gameName { color: var(--dim); font-size: 12px; }
+
+.tabs { display: flex; gap: 2px; padding: 4px 12px 0; position: relative; z-index: 1; }
+.tabs button { font: inherit; color: var(--dim); background: transparent; border: 1px solid transparent; border-bottom: 0; padding: 5px 14px 6px; cursor: pointer; border-radius: var(--radius) var(--radius) 0 0; }
+.tabs button:hover { color: var(--text); }
+.tabs [aria-selected="true"] { color: var(--text); background: var(--panel); border-bottom: 0; margin-bottom: -1px; padding-bottom: 7px; }
+
+.options { margin: 0 12px; padding: 14px 16px; border: 1px solid; border-color: var(--light) var(--dark) var(--dark) var(--light); min-height: 250px; }
+.sheet { display: grid; gap: 10px; }
+.row { display: grid; grid-template-columns: 11em 1fr; align-items: center; gap: 12px; }
+.row > span:first-child { color: var(--text); }
+.row.check { grid-template-columns: auto 1fr; gap: 10px; cursor: pointer; }
+.note { margin: -4px 0 2px calc(11em + 12px); color: var(--dim); font-size: 12px; max-width: 46ch; }
+.note.noKnives { margin-left: 0; }
+.note code { font: inherit; color: var(--text); }
+.status { margin: 0; min-height: 1.4em; color: var(--dim); font-size: 12px; }
+.status.error { color: #ffb19e; }
+
+/* Sunken fields */
+.options select, .options input[type="number"] {
+  font: inherit; color: var(--text); background: var(--well); padding: 4px 6px; min-width: 0; width: 100%; box-sizing: border-box;
+  border: 1px solid; border-color: var(--dark) var(--light) var(--light) var(--dark); border-radius: var(--radius);
+}
+.options select { appearance: none; padding-right: 26px; cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text) 50%), linear-gradient(-45deg, transparent 50%, var(--text) 50%);
+  background-position: right 12px center, right 7px center; background-size: 5px 5px; background-repeat: no-repeat; }
+.options select:disabled { color: var(--dim); cursor: default; }
+.options option { background: var(--well); color: var(--text); }
+
+.slider { display: flex; align-items: center; gap: 10px; }
+.slider output { min-width: 3ch; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.options input[type="range"] { flex: 1; min-width: 0; appearance: none; height: 18px; background: transparent; cursor: pointer; }
+.options input[type="range"]::-webkit-slider-runnable-track { height: 4px; background: var(--well); border: 1px solid; border-color: var(--dark) var(--light) var(--light) var(--dark); }
+.options input[type="range"]::-webkit-slider-thumb { appearance: none; width: 10px; height: 18px; margin-top: -8px; background: var(--panel); }
+.options input[type="range"]::-moz-range-track { height: 4px; background: var(--well); border: 1px solid; border-color: var(--dark) var(--light) var(--light) var(--dark); }
+.options input[type="range"]::-moz-range-thumb { width: 10px; height: 18px; background: var(--panel); border: 1px solid; border-color: var(--light) var(--dark) var(--dark) var(--light); border-radius: 0; }
+
+.options input[type="checkbox"] { appearance: none; margin: 0; width: 15px; height: 15px; background: var(--well); display: grid; place-content: center; cursor: pointer;
+  border: 1px solid; border-color: var(--dark) var(--light) var(--light) var(--dark); }
+.options input[type="checkbox"]:checked::after { content: ""; width: 8px; height: 4px; margin-top: -2px; border: solid var(--text); border-width: 0 0 2px 2px; transform: rotate(-45deg); }
+
+/* Raised buttons */
+.button, .play, .bindBtn { font: inherit; color: var(--text); background: var(--panel); padding: 4px 14px; cursor: pointer; border-radius: var(--radius); }
+.button:active, .play:active, .bindBtn:active { border-color: var(--dark) var(--light) var(--light) var(--dark); }
+.file { justify-self: start; position: relative; }
 .file input { position: absolute; width: 1px; height: 1px; opacity: 0; }
-.status { margin: 0; min-height: 1em; font-size: 12px; color: #c9b998; }
-.status.error { color: #ff9a8a; }
-.bind { display: flex; align-items: center; justify-content: space-between; font-size: 14px; color: #e8dcc6; }
-.bindBtn { font: inherit; padding: 6px 10px; min-width: 120px; color: #fff; background: #1a130b; border: 1px solid #6b5333; border-radius: 4px; cursor: pointer; }
-.bindBtn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.bindBtn { min-width: 9em; text-align: left; }
+
+.keylist { width: 100%; border-collapse: collapse; background: var(--well); border: 1px solid; border-color: var(--dark) var(--light) var(--light) var(--dark); }
+.keylist th { text-align: left; font-weight: 400; color: var(--dim); padding: 4px 8px; border-bottom: 1px solid var(--dark); background: var(--panel); }
+.keylist td { padding: 4px 8px; }
+.keylist tr:nth-child(even) td { background: rgb(255 255 255 / 0.03); }
+.keylist td:last-child { width: 40%; }
+
+.buttons { display: flex; justify-content: flex-end; padding: 12px; }
+.play { min-width: 8em; padding: 6px 18px; font-weight: 700; }
+
+/* Selection / focus: VGUI's khaki highlight and dotted focus rectangle. */
+.play:hover, .button:hover, .bindBtn:hover { background: color-mix(in srgb, var(--panel) 80%, var(--select)); }
+.options select:focus-visible, .options input:focus-visible, .button:focus-within, .play:focus-visible, .bindBtn:focus-visible, .tabs button:focus-visible {
+  outline: 1px dotted var(--text); outline-offset: -4px;
+}
+.options select:focus-visible, .options input[type="number"]:focus-visible { outline-offset: 1px; }
+.options input[type="checkbox"]:focus-visible { outline-offset: 2px; }
+::selection { background: var(--select); color: var(--select-text); }
+
+@media (max-width: 520px) {
+  .row { grid-template-columns: 1fr; gap: 4px; }
+  .note { margin-left: 0; }
+  .hudItem { font-size: 24px; }
+  .hudItem svg { width: 22px; height: 22px; }
+  .hudbar { padding: 0 12px 12px; }
+}
