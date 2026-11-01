@@ -1,0 +1,100 @@
+// Builds a minimal synthetic Source BSP (v21) for parser tests.
+type Lump = { index: number; size: number; count: number; write: (dv: DataView, off: number, i: number) => void } | { index: number; bytes: Uint8Array };
+
+export type BoxSpec = { mins: number[]; maxs: number[]; contents: number };
+
+export function buildBsp(opts: {
+  entities: string;
+  world: BoxSpec[];
+  submodels: BoxSpec[][]; // models 1..n
+  face?: { verts: number[][]; reflectivity: number[]; name: string; flags: number }[];
+  lzmaLump?: boolean;
+  ident?: string;
+}): ArrayBuffer {
+  const planes: { n: number[]; d: number }[] = [];
+  const brushes: { first: number; num: number; contents: number }[] = [];
+  const sides: number[] = [];
+  const addBox = (b: BoxSpec) => {
+    const first = sides.length;
+    const ps = [
+      { n: [1, 0, 0], d: b.maxs[0] }, { n: [-1, 0, 0], d: -b.mins[0] },
+      { n: [0, 1, 0], d: b.maxs[1] }, { n: [0, -1, 0], d: -b.mins[1] },
+      { n: [0, 0, 1], d: b.maxs[2] }, { n: [0, 0, -1], d: -b.mins[2] },
+    ];
+    for (const p of ps) {
+      sides.push(planes.length);
+      planes.push(p);
+    }
+    brushes.push({ first, num: 6, contents: b.contents });
+    return brushes.length - 1;
+  };
+
+  // One node per model, both children pointing at that model's single leaf.
+  const leafBrushLists: number[][] = [];
+  const models = [opts.world, ...opts.submodels];
+  for (const m of models) leafBrushLists.push(m.map(addBox));
+  const leafbrushes: number[] = [];
+  const leafs = leafBrushLists.map((list) => {
+    const first = leafbrushes.length;
+    leafbrushes.push(...list);
+    return { first, num: list.length };
+  });
+
+  const faces = opts.face ?? [];
+  const verts: number[][] = [];
+  const edges: number[][] = [[0, 0]];
+  const surfedges: number[] = [];
+  const names: string[] = [];
+  const faceRecs = faces.map((f) => {
+    const firstedge = surfedges.length;
+    const base = verts.length;
+    verts.push(...f.verts);
+    for (let i = 0; i < f.verts.length; i++) {
+      edges.push([base + i, base + ((i + 1) % f.verts.length)]);
+      surfedges.push(edges.length - 1);
+    }
+    names.push(f.name);
+    return { firstedge, numedges: f.verts.length, texinfo: names.length - 1 };
+  });
+  const strData = names.map((n) => n + '\0').join('');
+  const strOffsets: number[] = [];
+  names.reduce((off, n) => (strOffsets.push(off), off + n.length + 1), 0);
+
+  const lumps: Lump[] = [
+    { index: 0, bytes: new TextEncoder().encode(opts.entities + '\0') },
+    { index: 1, size: 20, count: planes.length, write: (dv, o, i) => { planes[i].n.forEach((v, k) => dv.setFloat32(o + k * 4, v, true)); dv.setFloat32(o + 12, planes[i].d, true); } },
+    { index: 2, size: 32, count: faces.length, write: (dv, o, i) => { faces[i].reflectivity.forEach((v, k) => dv.setFloat32(o + k * 4, v, true)); dv.setInt32(o + 12, i, true); } },
+    { index: 3, size: 12, count: verts.length, write: (dv, o, i) => verts[i].forEach((v, k) => dv.setFloat32(o + k * 4, v, true)) },
+    { index: 5, size: 32, count: models.length, write: (dv, o, i) => { dv.setInt32(o + 4, -(i + 1), true); dv.setInt32(o + 8, -(i + 1), true); } },
+    { index: 6, size: 72, count: faces.length, write: (dv, o, i) => { dv.setInt32(o + 64, faces[i].flags, true); dv.setInt32(o + 68, i, true); } },
+    { index: 7, size: 56, count: faceRecs.length, write: (dv, o, i) => { dv.setInt32(o + 4, faceRecs[i].firstedge, true); dv.setInt16(o + 8, faceRecs[i].numedges, true); dv.setInt16(o + 10, faceRecs[i].texinfo, true); dv.setInt16(o + 12, -1, true); } },
+    { index: 10, size: 32, count: leafs.length, write: (dv, o, i) => { dv.setInt32(o, 1, true); dv.setUint16(o + 24, leafs[i].first, true); dv.setUint16(o + 26, leafs[i].num, true); } },
+    { index: 12, size: 4, count: edges.length, write: (dv, o, i) => { dv.setUint16(o, edges[i][0], true); dv.setUint16(o + 2, edges[i][1], true); } },
+    { index: 13, size: 4, count: surfedges.length, write: (dv, o, i) => dv.setInt32(o, surfedges[i], true) },
+    { index: 14, size: 48, count: models.length, write: (dv, o, i) => { dv.setFloat32(o + 8, -100, true); dv.setInt32(o + 36, i, true); dv.setInt32(o + 40, 0, true); dv.setInt32(o + 44, i === 0 ? faceRecs.length : 0, true); } },
+    { index: 17, size: 2, count: leafbrushes.length, write: (dv, o, i) => dv.setUint16(o, leafbrushes[i], true) },
+    { index: 18, size: 12, count: brushes.length, write: (dv, o, i) => { dv.setInt32(o, brushes[i].first, true); dv.setInt32(o + 4, brushes[i].num, true); dv.setInt32(o + 8, brushes[i].contents, true); } },
+    { index: 19, size: 8, count: sides.length, write: (dv, o, i) => dv.setUint16(o, sides[i], true) },
+    { index: 43, bytes: new TextEncoder().encode(strData) },
+    { index: 44, size: 4, count: strOffsets.length, write: (dv, o, i) => dv.setInt32(o, strOffsets[i], true) },
+  ];
+
+  const HEADER = 1036;
+  const sizes = lumps.map((l) => ('bytes' in l ? l.bytes.length : l.size * l.count));
+  const total = HEADER + sizes.reduce((a, b) => a + b, 0);
+  const buf = new ArrayBuffer(total);
+  const dv = new DataView(buf);
+  const ident = opts.ident ?? 'VBSP';
+  for (let i = 0; i < 4; i++) dv.setUint8(i, ident.charCodeAt(i));
+  dv.setInt32(4, 21, true);
+  let off = HEADER;
+  lumps.forEach((l, k) => {
+    dv.setInt32(8 + l.index * 16, off, true);
+    dv.setInt32(8 + l.index * 16 + 4, sizes[k], true);
+    if ('bytes' in l) new Uint8Array(buf, off, l.bytes.length).set(l.bytes);
+    else for (let i = 0; i < l.count; i++) l.write(dv, off + i * l.size, i);
+    if (opts.lzmaLump && l.index === 1) 'LZMA'.split('').forEach((c, j) => dv.setUint8(off + j, c.charCodeAt(0)));
+    off += sizes[k];
+  });
+  return buf;
+}

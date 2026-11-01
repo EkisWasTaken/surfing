@@ -6,7 +6,7 @@ export type Brush = {
   planes: Plane[];
   mins: Vec3;
   maxs: Vec3;
-  kind: 'box' | 'ramp';
+  kind: 'box' | 'ramp' | 'bsp';
   // Ramps only: [wall bottom, wall top, foot] at the start end, then the same at the far end.
   corners?: Vec3[];
 };
