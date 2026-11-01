@@ -14,6 +14,7 @@ export type MapDef = {
   teleports: Teleport[];
   mesh?: BspMap['mesh']; // imported maps render this instead of brushes
   pak?: BspMap['pak'];
+  props?: BspMap['props'];
 };
 
 type Section = { angle: number; width: number };

@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import type { Brush } from './brush';
 import type { Vec3 } from './math';
 import { sandstone, limestone } from './textures';
-import { mapMaterials } from './mapMaterials';
+import { createMaterialSource } from './mapMaterials';
+import { parseModel } from './mdl';
 import type { BspMap } from './bsp';
 
 // The only place Source coords (x fwd, y left, z up) become three.js coords (x, y up, z).
@@ -143,6 +144,58 @@ function boxGeometry(b: Brush): THREE.BufferGeometry {
   return g.translate(c.x, c.y, c.z);
 }
 
+// Source → three.js basis (x, y, z) → (x, z, -y), used to move prop transforms into three space.
+const SOURCE_TO_THREE = new THREE.Matrix4().set(1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1);
+const THREE_TO_SOURCE = SOURCE_TO_THREE.clone().transpose();
+
+// Static props whose models are packed in the map; geometry is decoded once per model+skin and shared.
+function propMeshes(props: BspMap['props'], pak: Map<string, Uint8Array>, material: (candidates: string[]) => THREE.Material): THREE.Mesh[] {
+  const cache = new Map<string, { geometry: THREE.BufferGeometry; materials: THREE.Material[] } | null>();
+  const load = (model: string, skin: number) => {
+    const key = `${model}#${skin}`;
+    if (!cache.has(key)) {
+      const base = model.replace(/\.mdl$/, '');
+      const vtx = ['.dx90.vtx', '.vtx', '.dx80.vtx', '.sw.vtx'].map((e) => pak.get(base + e)).find(Boolean);
+      const mdl = pak.get(model), vvd = pak.get(base + '.vvd');
+      const mesh = mdl && vvd && vtx ? parseModel(mdl, vvd, vtx, skin) : null;
+      if (!mesh) cache.set(key, null);
+      else {
+        const p = mesh.positions, n = mesh.normals;
+        const tp = new Float32Array(p.length), tn = new Float32Array(n.length);
+        for (let i = 0; i < p.length; i += 3) {
+          tp[i] = p[i], tp[i + 1] = p[i + 2], tp[i + 2] = -p[i + 1];
+          tn[i] = n[i], tn[i + 1] = n[i + 2], tn[i + 2] = -n[i + 1];
+        }
+        const g = new THREE.BufferGeometry();
+        g.setAttribute('position', new THREE.BufferAttribute(tp, 3));
+        g.setAttribute('normal', new THREE.BufferAttribute(tn, 3));
+        g.setAttribute('uv', new THREE.BufferAttribute(mesh.uvs, 2));
+        mesh.groups.forEach((gr, i) => g.addGroup(gr.start, gr.count, i));
+        cache.set(key, { geometry: g, materials: mesh.groups.map((gr) => material(gr.materials)) });
+      }
+    }
+    return cache.get(key);
+  };
+  const out: THREE.Mesh[] = [];
+  for (const prop of props) {
+    const model = load(prop.model, prop.skin);
+    if (!model) continue;
+    const { x: pitch, y: yaw, z: roll } = prop.angles;
+    // Source AngleMatrix: yaw about Z, then pitch about Y, then roll about X.
+    const src = new THREE.Matrix4()
+      .makeTranslation(prop.origin.x, prop.origin.y, prop.origin.z)
+      .multiply(new THREE.Matrix4().makeRotationZ(yaw * DEG))
+      .multiply(new THREE.Matrix4().makeRotationY(pitch * DEG))
+      .multiply(new THREE.Matrix4().makeRotationX(roll * DEG))
+      .multiply(new THREE.Matrix4().makeScale(prop.scale, prop.scale, prop.scale));
+    const mesh = new THREE.Mesh(model.geometry, model.materials);
+    mesh.matrixAutoUpdate = false;
+    mesh.matrix.copy(SOURCE_TO_THREE).multiply(src).multiply(THREE_TO_SOURCE);
+    out.push(mesh);
+  }
+  return out;
+}
+
 export function createRenderer(canvas: HTMLCanvasElement) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio);
@@ -157,7 +210,7 @@ export function createRenderer(canvas: HTMLCanvasElement) {
   const floorMat = surfaceMaterial(limestone(), 256);
   const bspMat = surfaceMaterial(sandstone(), 256, limestone());
   const s3tc = renderer.extensions.has('WEBGL_compressed_texture_s3tc');
-  let mapMats: THREE.Material[] = [];
+  let materials: ReturnType<typeof createMaterialSource> | null = null;
   const world = new THREE.Group();
   scene.add(world);
   let hfov = 90;
@@ -172,19 +225,19 @@ export function createRenderer(canvas: HTMLCanvasElement) {
   resize();
 
   return {
-    setMap(map: { brushes: Brush[]; mesh?: BspMap['mesh']; pak?: BspMap['pak'] }) {
-      for (const m of world.children as THREE.Mesh[]) m.geometry.dispose();
-      for (const m of mapMats) {
-        (m as THREE.ShaderMaterial).uniforms.map?.value?.dispose();
-        m.dispose();
-      }
-      mapMats = [];
+    setMap(map: { brushes: Brush[]; mesh?: BspMap['mesh']; pak?: BspMap['pak']; props?: BspMap['props'] }) {
+      const geometries = new Set<THREE.BufferGeometry>();
+      world.traverse((o) => o instanceof THREE.Mesh && geometries.add(o.geometry));
+      geometries.forEach((g) => g.dispose());
+      materials?.dispose();
+      materials = null;
       world.clear();
       if (map.mesh) {
         // The map's own textures where packed and decodable, desert fallback elsewhere.
-        const own = mapMaterials(map.mesh.groups.map((g) => g.texture), map.pak ?? new Map(), s3tc, SUN, HORIZON);
-        mapMats = own.filter((m): m is THREE.Material => !!m);
-        world.add(new THREE.Mesh(bspGeometry(map.mesh), own.map((m) => m ?? bspMat)));
+        materials = createMaterialSource(map.pak ?? new Map(), s3tc, SUN, HORIZON);
+        const src = materials;
+        world.add(new THREE.Mesh(bspGeometry(map.mesh), map.mesh.groups.map((g) => src.get([g.texture]) ?? bspMat)));
+        for (const p of propMeshes(map.props ?? [], map.pak ?? new Map(), (c) => src.get(c) ?? floorMat)) world.add(p);
         return;
       }
       for (const b of map.brushes) world.add(new THREE.Mesh(b.kind === 'ramp' ? rampGeometry(b) : boxGeometry(b), b.kind === 'ramp' ? rampMat : floorMat));

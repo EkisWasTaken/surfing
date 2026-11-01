@@ -114,7 +114,7 @@ describe('resolveMaterial', () => {
   );
   it('finds the base texture and flags', () => {
     const m = resolveMaterial('CONCRETE/FLOOR', pak)!;
-    expect(m.vtf.length).toBeGreaterThan(80);
+    expect(m.vtf!.length).toBeGreaterThan(80);
     expect(m.alphatest).toBe(true);
     expect(m.translucent).toBe(false);
   });
@@ -123,6 +123,13 @@ describe('resolveMaterial', () => {
   });
   it('handles unquoted keys and translucency', () => {
     expect(resolveMaterial('glass/win', pak)?.translucent).toBe(true);
+  });
+  it('ignores leading slashes in material paths', () => {
+    expect(resolveMaterial('\\concrete/floor', pak)?.alphatest).toBe(true);
+  });
+  it('turns texture-less tinted materials into a solid color', () => {
+    const tinted = readZip(zip({ 'materials/models/x/green.vmt': '"vertexlitgeneric"\n{\n\t%tooltexture "cs_havana/white"\n\t"$color2" "{0 90 0}"\n}' }));
+    expect(resolveMaterial('models\\x\\green', tinted)).toEqual({ vtf: null, color: [0, 90 / 255, 0], alphatest: false, translucent: false });
   });
   it('returns null when the material is not packed', () => {
     expect(resolveMaterial('dev/dev_measuregeneric01', pak)).toBeNull();

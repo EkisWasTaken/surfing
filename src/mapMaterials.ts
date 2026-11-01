@@ -61,11 +61,42 @@ function texturedMaterial(map: THREE.Texture, alphatest: boolean, translucent: b
 }
 
 // One material per texture group; null where the texture isn't packed or can't be decoded.
-export function mapMaterials(textures: string[], pak: Map<string, Uint8Array>, s3tc: boolean, sun: THREE.Vector3, haze: THREE.Color): (THREE.Material | null)[] {
-  return textures.map((name) => {
+// Builds materials from a map's pakfile, caching by resolved name so props sharing a texture share a material.
+export function createMaterialSource(pak: Map<string, Uint8Array>, s3tc: boolean, sun: THREE.Vector3, haze: THREE.Color) {
+  const cache = new Map<string, THREE.Material | null>();
+  const build = (name: string): THREE.Material | null => {
     const m = resolveMaterial(name, pak);
-    const v = m && parseVtf(m.vtf);
+    if (!m) return null;
+    if (!m.vtf) {
+      // Texture-less tinted material: a 1×1 texture of its color.
+      const c = m.color!.map((v) => Math.round(v * 255));
+      const t = new THREE.DataTexture(new Uint8Array([c[0], c[1], c[2], 255]), 1, 1, THREE.RGBAFormat);
+      t.colorSpace = THREE.SRGBColorSpace;
+      t.needsUpdate = true;
+      return texturedMaterial(t, false, false, sun, haze);
+    }
+    const v = parseVtf(m.vtf);
     const t = v && toTexture(v, s3tc);
-    return t ? texturedMaterial(t, m!.alphatest, m!.translucent, sun, haze) : null;
-  });
+    return t ? texturedMaterial(t, m.alphatest, m.translucent, sun, haze) : null;
+  };
+  return {
+    // First candidate path that resolves wins (models list one per cdmaterials dir).
+    get(candidates: string[]): THREE.Material | null {
+      for (const name of candidates) {
+        const k = name.toLowerCase();
+        if (!cache.has(k)) cache.set(k, build(name));
+        const mat = cache.get(k);
+        if (mat) return mat;
+      }
+      return null;
+    },
+    dispose() {
+      for (const m of cache.values()) {
+        if (!m) continue;
+        (m as THREE.ShaderMaterial).uniforms.map?.value?.dispose();
+        m.dispose();
+      }
+      cache.clear();
+    },
+  };
 }
