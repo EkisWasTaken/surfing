@@ -156,8 +156,11 @@ export function createViewmodel(renderer: THREE.WebGLRenderer) {
       knife.mesh.material = painted as THREE.MeshStandardMaterial[];
       return true;
     },
+    // As in CS: inspect starts once the knife is ready again (attack cooldown over), cutting off the rest of a swing;
+    // an attack in turn cuts off the inspect. Not during the draw, and pressing it mid-inspect doesn't restart it.
     inspect() {
-      if (anim.clip === 'idle') anim = { clip: 'lookat01', start: performance.now() };
+      const now = performance.now();
+      if (anim.clip !== 'draw' && anim.clip !== 'lookat01' && now >= nextAttack) anim = { clip: 'lookat01', start: now };
     },
     // CS knife timing on a miss: slash every 0.5 s (alternating sides), stab every 1 s; either interrupts draw/inspect.
     attack(kind: 'light' | 'heavy') {
