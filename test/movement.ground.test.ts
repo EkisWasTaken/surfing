@@ -77,3 +77,21 @@ describe('ground movement', () => {
     expect(p.onGround).toBe(true);
   });
 });
+
+describe('autobhop off', () => {
+  it('holding jump only jumps once', async () => {
+    const { config } = await import('../src/config');
+    config.autobhop = false;
+    try {
+      let takeoffs = 0;
+      let was = true;
+      run(grounded(vec(0, 0, 1), [floor]), { ...idle, jump: true }, [floor], 200, (q) => {
+        if (!q.onGround && was) takeoffs++;
+        was = q.onGround;
+      });
+      expect(takeoffs).toBe(1);
+    } finally {
+      config.autobhop = true;
+    }
+  });
+});

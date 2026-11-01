@@ -4,13 +4,13 @@ import { Brush } from './brush';
 import { trace, DIST_EPSILON } from './trace';
 import { config } from './config';
 
-export type Player = { pos: Vec3; vel: Vec3; onGround: boolean; ducked: boolean; groundNormal: Vec3 | null };
+export type Player = { pos: Vec3; vel: Vec3; onGround: boolean; ducked: boolean; groundNormal: Vec3 | null; jumpHeld: boolean };
 export type Cmd = { forward: number; side: number; jump: boolean; duck: boolean; yaw: number; pitch: number };
 
 const NON_JUMP_VELOCITY = 140;
 const MAX_CLIP_PLANES = 5;
 
-export const newPlayer = (pos: Vec3): Player => ({ pos: copy(pos), vel: vec(), onGround: false, ducked: false, groundNormal: null });
+export const newPlayer = (pos: Vec3): Player => ({ pos: copy(pos), vel: vec(), onGround: false, ducked: false, groundNormal: null, jumpHeld: false });
 
 export function clipVelocity(v: Vec3, n: Vec3, overbounce: number): Vec3 {
   let out = sub(v, scale(n, dot(v, n) * overbounce));
@@ -211,7 +211,8 @@ export function step(p: Player, cmd: Cmd, brushes: Brush[], dt: number): Player 
 
   duck(s, cmd.duck);
   s.vel.z -= config.gravity * 0.5 * dt;
-  if (cmd.jump && s.onGround && config.autobhop) {
+  // Without autobhop, jump needs a fresh press (Source m_nOldButtons & IN_JUMP check).
+  if (cmd.jump && s.onGround && (config.autobhop || !p.jumpHeld)) {
     s.onGround = false;
     // CS:GO CheckJumpButton overwrites z then calls FinishGravity itself.
     s.vel.z = config.jumpVelocity - config.gravity * 0.5 * dt;
@@ -229,5 +230,5 @@ export function step(p: Player, cmd: Cmd, brushes: Brush[], dt: number): Player 
   checkVelocity(s);
   if (s.onGround) s.vel.z = 0;
 
-  return { pos: s.pos, vel: s.vel, onGround: s.onGround, ducked: s.ducked, groundNormal: s.groundNormal };
+  return { pos: s.pos, vel: s.vel, onGround: s.onGround, ducked: s.ducked, groundNormal: s.groundNormal, jumpHeld: cmd.jump };
 }
