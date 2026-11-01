@@ -65,7 +65,7 @@ if (existsSync(cs2Dir)) {
     mkdirSync('public/cs2', { recursive: true });
     writeFileSync('public/cs2/knife.json', JSON.stringify(meshToJson(mesh)));
     console.log(`Knife: ${mesh.positions.length / 3} vertices, ${mesh.groups.length} material(s) -> public/cs2/knife.json`);
-    // Arms + first-person animation: CS2's viewmodel skeleton, its knife clips, and the default glove.
+    // Arms + first-person animation: CS2's viewmodel skeleton, its knife clips, and the default CT arms.
     const data = (path: string) => parseKV3(resourceBlocks(get(path)!).find((b) => b.type === 'DATA')!.data);
     const CLIPS = 'animation/anims/viewmodel/knife/_default_knife/';
     const clips = Object.fromEntries(
@@ -74,7 +74,8 @@ if (existsSync(cs2Dir)) {
         return [n.replace('_knife', ''), { frames: c.frames, duration: c.duration, poses: b64(new Uint8Array(c.poses.buffer)) }];
       }),
     );
-    const arms = await readCs2Mesh(get('agents/models/shared/arms/glove_fullfinger/glove_fullfinger.vmdl_c')!, get, 'viewmodel');
+    // The default CT agent's own first-person gloves and sleeves, as CS2 shows them with no gloves equipped.
+    const arms = await readCs2Mesh(get('agents/models/ctm_sas/ctm_sas.vmdl_c')!, get, ['firstperson_default_gloves_arms', 'firstperson_sleeves']);
     const skeleton = readNmSkeleton(data('animation/skeletons/characters/viewmodel.vnmskel_c'));
     writeFileSync('public/cs2/viewmodel.json', JSON.stringify({ skeleton, clips, arms: meshToJson(arms) }));
     console.log(`Arms: ${arms.positions.length / 3} vertices, ${skeleton.names.length} bones, clips ${Object.keys(clips).join(', ')} -> public/cs2/viewmodel.json`);

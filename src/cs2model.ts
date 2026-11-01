@@ -76,8 +76,8 @@ function colorTexture(material: string, get: Get): Vtex | null {
   return tex ? readVtex(tex) : null;
 }
 
-// `only` picks one embedded mesh by name (e.g. arms models carry both "worldmodel" and "viewmodel").
-export async function readCs2Mesh(vmdl: Uint8Array, get: Get, only?: string): Promise<Cs2Mesh> {
+// `only` picks embedded meshes by name (agent models carry third- and first-person meshes side by side).
+export async function readCs2Mesh(vmdl: Uint8Array, get: Get, only?: string[]): Promise<Cs2Mesh> {
   await MeshoptDecoder.ready;
   const blocks = resourceBlocks(vmdl);
   const ctrlBlock = blocks.find((b) => b.type === 'CTRL');
@@ -89,7 +89,7 @@ export async function readCs2Mesh(vmdl: Uint8Array, get: Get, only?: string): Pr
   const pos: number[] = [], uv: number[] = [], idx: number[] = [], jt: number[] = [], wt: number[] = [];
   const groups: Cs2Mesh['groups'] = [];
   for (const em of ctrl.embedded_meshes as Any[]) {
-    if (only && em.m_Name !== only) continue;
+    if (only && !only.includes(em.m_Name)) continue;
     const remapStart = Number(model?.m_remappingTableStarts?.[em.m_nMeshIndex] ?? 0);
     const vbs = (em.m_vertexBuffers as Any[]).map((d) => ({ d, base: -1, v: vertices(d, decodeBuffer(d, blocks[d.m_nBlockIndex].data, false)) }));
     const ibs = (em.m_indexBuffers as Any[]).map((d) => {
