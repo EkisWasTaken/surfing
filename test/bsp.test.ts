@@ -249,3 +249,22 @@ describe('sky and fog', () => {
     expect(parseBsp(buildBsp({ entities: off, world: [floor], submodels: [] }), 'o').fog).toBeNull();
   });
 });
+
+describe('face orientation with the side flag', () => {
+  it('faces along the plane normal even when side = 1 (the flag is about the BSP node, not the face)', () => {
+    const m = parseBsp(
+      buildBsp({
+        entities,
+        world: [floor],
+        submodels: [],
+        face: [{ verts: [[-512, 512, 0], [512, 512, 0], [512, -512, 0], [-512, -512, 0]], reflectivity: [1, 1, 1], name: 'A', flags: 0, normal: [0, 0, 1], side: 1 }],
+      }),
+      's',
+    );
+    const p = m.mesh.positions;
+    for (let i = 0; i < p.length; i += 9) {
+      const u = [p[i + 3] - p[i], p[i + 4] - p[i + 1]], v = [p[i + 6] - p[i], p[i + 7] - p[i + 1]];
+      expect(u[0] * v[1] - u[1] * v[0]).toBeGreaterThan(0); // front faces +Z, the plane normal
+    }
+  });
+});

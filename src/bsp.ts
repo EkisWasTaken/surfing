@@ -264,7 +264,7 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
       while (end < strOfs + strLen && dv.getUint8(end) !== 0) end++;
       return new TextDecoder().decode(new Uint8Array(buffer, start, end - start));
     };
-    const faceRec = (o: number) => ({ plane: u16(o), side: dv.getUint8(o + 2), firstedge: i32(o + 4), numedges: i16(o + 8), texinfo: i16(o + 10), style0: dv.getUint8(o + 16), lightofs: i32(o + 20), lmMins: [i32(o + 28), i32(o + 32)], lmSize: [i32(o + 36), i32(o + 40)] });
+    const faceRec = (o: number) => ({ plane: u16(o), firstedge: i32(o + 4), numedges: i16(o + 8), texinfo: i16(o + 10), style0: dv.getUint8(o + 16), lightofs: i32(o + 20), lmMins: [i32(o + 28), i32(o + 32)], lmSize: [i32(o + 36), i32(o + 40)] });
     const faces = records(L.FACES, 56, faceRec);
     // LDR lighting uses the main face table; HDR-only maps keep light offsets in a parallel HDR face table.
     let light = lump(L.LIGHTING);
@@ -350,15 +350,15 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
       const ti = texinfo[it.ti], ax = lmAxes[it.ti], td = texdata[ti.texdata];
       const tw = td?.w ?? 1, th = td?.h ?? 1;
       const lf = lightFaces[it.face];
-      // Wind counter-clockwise around the face's front normal (Source stores faces clockwise).
+      // Wind counter-clockwise around the face plane normal: that is always the front. (dface side only says how the
+      // face sits on its BSP node; flipping by it culled ~40% of real surfaces.)
       const f = faces[it.face];
       const pn = planes[f.plane]?.normal ?? vec(0, 0, 1);
-      const sign = f.side ? -1 : 1;
       const { poly, rect: r } = it;
       for (let k = 1; k + 1 < poly.length; k++) {
         const [a, b, d] = [poly[0], poly[k], poly[k + 1]];
         const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = d[0] - a[0], vy = d[1] - a[1], vz = d[2] - a[2];
-        const facing = ((uy * vz - uz * vy) * pn.x + (uz * vx - ux * vz) * pn.y + (ux * vy - uy * vx) * pn.z) * sign;
+        const facing = ((uy * vz - uz * vy) * pn.x + (uz * vx - ux * vz) * pn.y + (ux * vy - uy * vx) * pn.z);
         for (const v of facing >= 0 ? [a, b, d] : [a, d, b]) {
           bucket.pos.push(v[0] + it.offset.x, v[1] + it.offset.y, v[2] + it.offset.z);
           bucket.col.push(...it.color);

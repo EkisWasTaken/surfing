@@ -9,7 +9,7 @@ export function buildBsp(opts: {
   submodels: BoxSpec[][]; // models 1..n
   // light.size = luxels per axis minus one (Source's LightmapTextureSizeInLuxels); samples are [r, g, b, exp] per luxel.
   // Lightmap axes: s = x/256 + 2, t = y/256 + 2 (so a ±512 face spans luxels 0..4).
-  face?: { verts: number[][]; reflectivity: number[]; name: string; flags: number; normal?: number[]; light?: { size: number[]; samples: number[][] }; model?: number }[]; // faces must be grouped by model, in order
+  face?: { verts: number[][]; reflectivity: number[]; name: string; flags: number; normal?: number[]; light?: { size: number[]; samples: number[][] }; model?: number; side?: number }[]; // faces must be grouped by model, in order
   // Put lighting in the HDR lumps only (53 + face table 58), leaving the LDR face offsets meaningless, as real HDR-only maps do.
   hdrOnly?: boolean;
   lzmaLump?: boolean;
@@ -77,6 +77,7 @@ export function buildBsp(opts: {
   });
   const writeFace = (lightofsFor: (i: number) => number) => (dv: DataView, o: number, i: number) => {
     dv.setUint16(o, faceRecs[i].plane, true);
+    dv.setUint8(o + 2, faces[i].side ?? 0);
     dv.setInt32(o + 4, faceRecs[i].firstedge, true);
     dv.setInt16(o + 8, faceRecs[i].numedges, true);
     dv.setInt16(o + 10, faceRecs[i].texinfo, true);
