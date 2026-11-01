@@ -7,6 +7,7 @@ import { bspToMap, goalBox, saveGoal } from './maps/imported';
 import { parseBsp } from './bsp';
 import { readZip } from './pak';
 import { meshFromJson, unb64, vtexFromJson, VtexJson } from './cs2model';
+import { parseMdl } from './goldsrcmdl';
 import { createGrid } from './grid';
 import { newPlayer, unstick, Player } from './movement';
 import { simTick, touching, newTickState } from './sim';
@@ -74,6 +75,7 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
     input.setJumpBind(next.jumpBind);
     renderer.setFov(next.fov);
     if (tickChanged) acc = createAccumulator(1 / config.tickrate);
+    if (gameChanged) renderer.setGame(next.game);
     if (gameChanged && !mapChanged) respawn(); // hulls and rules differ: start the run over under the new ones
     if (knifeChanged) loadKnife(next.knife);
     else if (finishChanged) applyFinish();
@@ -166,6 +168,12 @@ function applyFinish() {
     })
     .catch((e) => console.warn('finish:', e));
 }
+// CS 1.6's knife and hands (v_knife.mdl from your Counter-Strike install, copied by the import).
+renderer.setGame(settings.game);
+fetch('/cs16/v_knife.mdl')
+  .then((r) => (r.ok && !r.headers.get('content-type')?.includes('html') ? r.arrayBuffer() : null))
+  .then((b) => b && renderer.setKnife16(parseMdl(b)))
+  .catch((e) => console.warn('CS 1.6 knife:', e));
 json('/cs2/viewmodel.json')
   .then((j) => j && renderer.setArms({ skeleton: j.skeleton, arms: meshFromJson(j.arms) }))
   .catch((e) => console.warn('viewmodel arms:', e));

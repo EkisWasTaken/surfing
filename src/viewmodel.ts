@@ -8,9 +8,12 @@ import type { Vtex } from './cs2';
 import type { NmSkeleton } from './cs2anim';
 import type { Finish } from './cs2finish';
 import { finishMaterial, PaintInputs, FinishShared } from './finishMaterial';
+import type { Mdl, MdlSequence } from './goldsrcmdl';
+import type { GameMode } from './config';
 
 const DEG = Math.PI / 180;
-const VIEWMODEL_FOV = 68; // CS:GO viewmodel_fov default (horizontal at 4:3)
+// CS:GO viewmodel_fov default; CS 1.6 draws the viewmodel at fov 90. Horizontal at 4:3.
+const VIEWMODEL_FOV: Record<GameMode, number> = { csgo: 68, cs16: 90 };
 const INCH = 0.0254; // Source units → viewmodel metres
 
 type Track = { frames: number; duration: number; poses: Float32Array };
@@ -102,6 +105,55 @@ function skinnedRig(skeleton: NmSkeleton, model: Cs2Mesh, bptc: boolean, metal: 
   return { root, mesh, sample, bone: (n: string) => bones[names.indexOf(n)] };
 }
 
+// A GoldSrc (CS 1.6) viewmodel: vertices sit in their bone's space, so identity inverse-bind matrices pose them.
+function goldsrcRig(mdl: Mdl) {
+  const bones = mdl.bones.map((b) => Object.assign(new THREE.Bone(), { name: b.name }));
+  const root = new THREE.Group();
+  bones.forEach((bone, i) => (mdl.bones[i].parent >= 0 ? bones[mdl.bones[i].parent] : root).add(bone));
+  const skeleton = new THREE.Skeleton(bones, bones.map(() => new THREE.Matrix4()));
+  for (const m of mdl.meshes) {
+    const n = m.bones.length, joints = new Uint16Array(n * 4), weights = new Float32Array(n * 4);
+    m.bones.forEach((b, i) => ((joints[i * 4] = b), (weights[i * 4] = 1)));
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(m.positions, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(m.normals, 3));
+    g.setAttribute('uv', new THREE.BufferAttribute(m.uvs, 2));
+    g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(joints, 4));
+    g.setAttribute('skinWeight', new THREE.BufferAttribute(weights, 4));
+    const t = mdl.textures[m.texture];
+    const map = t ? new THREE.DataTexture(t.rgba, t.width, t.height, THREE.RGBAFormat) : null;
+    if (map) {
+      map.colorSpace = THREE.SRGBColorSpace;
+      map.magFilter = THREE.LinearFilter;
+      map.minFilter = THREE.LinearMipmapLinearFilter;
+      map.generateMipmaps = true;
+      map.wrapS = map.wrapT = THREE.RepeatWrapping;
+      map.needsUpdate = true;
+    }
+    // GoldSrc models are lit flat-ish and strips mix windings: matte, both sides.
+    const mat = new THREE.MeshStandardMaterial({ map, metalness: 0, roughness: 0.85, side: THREE.DoubleSide, alphaTest: t?.masked ? 0.5 : 0 });
+    const mesh = new THREE.SkinnedMesh(g, mat);
+    mesh.frustumCulled = false;
+    root.add(mesh);
+    mesh.bind(skeleton, new THREE.Matrix4());
+  }
+  const qa = new THREE.Quaternion(), qb = new THREE.Quaternion();
+  const sample = (seq: MdlSequence, t: number, loop: boolean) => {
+    const nb = bones.length, x = Math.max(0, t * seq.fps), f0 = Math.min(seq.frames - 1, Math.floor(x));
+    const f1 = loop ? (f0 + 1) % seq.frames : Math.min(f0 + 1, seq.frames - 1), a = Math.min(1, x - Math.floor(x));
+    for (let i = 0; i < nb; i++) {
+      const o0 = (f0 * nb + i) * 7, o1 = (f1 * nb + i) * 7, p = seq.poses;
+      bones[i].position.set(p[o0] + (p[o1] - p[o0]) * a, p[o0 + 1] + (p[o1 + 1] - p[o0 + 1]) * a, p[o0 + 2] + (p[o1 + 2] - p[o0 + 2]) * a);
+      bones[i].quaternion.copy(qa.fromArray(p, o0 + 3).slerp(qb.fromArray(p, o1 + 3), a));
+    }
+  };
+  return { root, sequences: new Map(mdl.sequences.map((q) => [q.label.toLowerCase(), q])), sample };
+}
+
+// CS 1.6 v_knife sequences for our clip names (it has no inspect), and each game's miss timing.
+const CS16_CLIPS: Partial<Record<keyof KnifeBundle['clips'], string>> = { draw: 'draw', idle: 'idle', light1: 'midslash1', light2: 'midslash2', heavy: 'stab_miss' };
+const COOLDOWN: Record<GameMode, { light: number; heavy: number }> = { csgo: { light: 500, heavy: 1000 }, cs16: { light: 350, heavy: 1000 } };
+
 export function createViewmodel(renderer: THREE.WebGLRenderer) {
   const scene = new THREE.Scene();
   // Something for metal to reflect: knife steel and anodized finishes are mostly reflection.
@@ -117,20 +169,50 @@ export function createViewmodel(renderer: THREE.WebGLRenderer) {
   const hold = new THREE.Group(); // knife without arms: lower right, angled in like CS's knife idle
   hold.position.set(10.6, -4.7, -5.1);
   hold.rotation.set(0.8, 1.35, -0.35, 'ZYX');
+  const cs2 = new THREE.Group(), cs16 = new THREE.Group(); // one viewmodel per game, the other hidden
   rig.add(view);
-  view.add(hold);
+  view.add(cs2, cs16);
+  cs2.add(hold);
   scene.add(rig);
+  let game: GameMode = 'csgo';
+  cs16.visible = false;
+  let k16: ReturnType<typeof goldsrcRig> | null = null;
 
   let arms: ReturnType<typeof skinnedRig> | null = null;
   let knife: { root: THREE.Object3D; mesh: THREE.Mesh; base: THREE.MeshStandardMaterial[]; rig: ReturnType<typeof skinnedRig> | null; clips: KnifeBundle['clips']; paint: PaintInputs | null } | null = null;
   let anim = { clip: 'draw' as keyof KnifeBundle['clips'], start: -1 }; // start < 0: begins on the first drawn frame (after upload/compile stalls)
   let nextAttack = 0, slashLeft = false;
+  const seq16 = (clip: keyof KnifeBundle['clips']) => (CS16_CLIPS[clip] ? k16?.sequences.get(CS16_CLIPS[clip]!) : undefined);
+  const duration = (clip: keyof KnifeBundle['clips']) => {
+    if (game !== 'cs16') return knife?.clips[clip].duration ?? 0;
+    const q = seq16(clip);
+    return q ? q.frames / q.fps : 0;
+  };
+  const resize = (aspect: number) => {
+    camera.aspect = aspect;
+    camera.fov = (2 * Math.atan(Math.tan((VIEWMODEL_FOV[game] * DEG) / 2) * 0.75)) / DEG;
+    camera.updateProjectionMatrix();
+  };
   const mount = () => knife && (arms?.bone('wpn') ?? hold).add(knife.root); // weapons ride the viewmodel skeleton's wpn bone
 
   return {
     scene,
     camera,
-    empty: () => !knife && !arms,
+    empty: () => (game === 'cs16' ? !k16 : !knife && !arms),
+    setGame(g: GameMode) {
+      game = g;
+      cs2.visible = g === 'csgo';
+      cs16.visible = g === 'cs16';
+      anim = { clip: 'draw', start: -1 };
+      nextAttack = 0;
+      resize(camera.aspect);
+    },
+    setKnife16(mdl: Mdl) {
+      k16?.root.removeFromParent();
+      k16 = goldsrcRig(mdl);
+      cs16.add(k16.root);
+      if (game === 'cs16') anim = { clip: 'draw', start: -1 };
+    },
     setKnife(b: KnifeBundle, bptc: boolean) {
       knife?.root.removeFromParent();
       const r = b.skeleton && b.mesh.skin ? skinnedRig(b.skeleton, b.mesh, bptc, 0.35) : null;
@@ -141,7 +223,7 @@ export function createViewmodel(renderer: THREE.WebGLRenderer) {
     },
     setArms(b: ArmsBundle, bptc: boolean) {
       arms = skinnedRig(b.skeleton, b.arms, bptc, 0);
-      view.add(arms.root);
+      cs2.add(arms.root);
       mount();
       anim = { clip: 'draw', start: -1 };
     },
@@ -159,33 +241,36 @@ export function createViewmodel(renderer: THREE.WebGLRenderer) {
     // As in CS: inspect starts once the knife is ready again (attack cooldown over), cutting off the rest of a swing;
     // an attack in turn cuts off the inspect. Not during the draw, and pressing it mid-inspect doesn't restart it.
     inspect() {
+      if (game === 'cs16') return; // CS 1.6 has no inspect
       const now = performance.now();
       if (anim.clip !== 'draw' && anim.clip !== 'lookat01' && now >= nextAttack) anim = { clip: 'lookat01', start: now };
     },
-    // CS knife timing on a miss: slash every 0.5 s (alternating sides), stab every 1 s; either interrupts draw/inspect.
+    // Knife timing on a miss (slash: CS:GO 0.5 s, 1.6 0.35 s; stab 1 s), slashes alternating sides; interrupts draw/inspect.
     attack(kind: 'light' | 'heavy') {
       const now = performance.now();
-      if (!knife || now < nextAttack) return;
+      if ((game === 'cs16' ? !k16 : !knife) || now < nextAttack) return;
       const clip = kind === 'heavy' ? 'heavy' : slashLeft ? 'light2' : 'light1';
       if (kind === 'light') slashLeft = !slashLeft;
-      nextAttack = now + (kind === 'heavy' ? 1000 : 500);
+      nextAttack = now + COOLDOWN[game][kind];
       anim = { clip, start: now };
     },
-    resize(aspect: number) {
-      camera.aspect = aspect;
-      camera.fov = (2 * Math.atan(Math.tan((VIEWMODEL_FOV * DEG) / 2) * 0.75)) / DEG;
-      camera.updateProjectionMatrix();
-    },
+    resize,
     apply(p: Pose) {
       rig.position.set(p.x - p.swayX, p.y - p.swayY, 0);
       rig.rotation.set(p.swayY * 2, p.swayX * 2, 0);
-      if (!arms || !knife) return;
+      if (game === 'cs16' ? !k16 : !arms || !knife) return;
       if (anim.start < 0) anim.start = performance.now();
-      const t = (performance.now() - anim.start) / 1000, d = knife.clips[anim.clip].duration;
+      const t = (performance.now() - anim.start) / 1000, d = duration(anim.clip);
       if (anim.clip !== 'idle' && t >= d) anim = { clip: 'idle', start: anim.start + d * 1000 }; // one-shots fall back to idle
-      const c = knife.clips[anim.clip], at = ((performance.now() - anim.start) / 1000) % c.duration;
-      arms.sample(c, at);
-      if (c.knife) knife.rig?.sample(c.knife, at);
+      const at = (performance.now() - anim.start) / 1000, idle = anim.clip === 'idle';
+      if (game === 'cs16') {
+        const q = seq16(anim.clip);
+        if (q) k16!.sample(q, idle ? at % (q.frames / q.fps) : at, idle);
+        return;
+      }
+      const c = knife!.clips[anim.clip];
+      arms!.sample(c, at % c.duration);
+      if (c.knife) knife!.rig?.sample(c.knife, at % c.duration);
     },
   };
 }

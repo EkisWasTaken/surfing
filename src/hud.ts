@@ -36,12 +36,13 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
           <label>FOV <output name="fovOut"></output>
             <input name="fov" type="range" min="60" max="130" step="1" />
           </label>
-          <label>Game <span class="hint">(movement rules)</span>
+          <label>Game <span class="hint">(movement + viewmodel)</span>
             <select name="game"><option value="csgo">CS:GO</option><option value="cs16">CS 1.6</option></select>
           </label>
           <label>Tickrate <span class="hint tickHint"></span>
             <select name="tickrate"><option value="64">64</option><option value="128">128</option></select>
           </label>
+          <div class="cs2Only">
           <label class="knifePick" hidden>Knife
             <select name="knife"></select>
           </label>
@@ -55,6 +56,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
             <label>Pattern seed <span class="hint">(0–1000)</span>
               <input name="seed" type="number" min="0" max="1000" step="1" />
             </label>
+          </div>
           </div>
           <div class="bind">Jump <button type="button" class="bindBtn"></button></div>
           <label class="check"><input name="autobhop" type="checkbox" /> Auto-bhop (hold jump)</label>
@@ -78,6 +80,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   const showGame = () => {
     el.tickrate.disabled = cur.game === 'cs16';
     $('.tickHint').textContent = cur.game === 'cs16' ? '(CS 1.6 runs at 100 fps)' : '';
+    $('.cs2Only').hidden = cur.game === 'cs16'; // CS 1.6 has one knife, no skins
   };
   showGame();
   el.autobhop.checked = cur.autobhop;

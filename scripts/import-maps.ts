@@ -204,6 +204,14 @@ if (existsSync(cs2Dir)) {
   console.log(`Finishes: ${Object.keys(names).length} -> public/cs2/finishes`);
 }
 
+// CS 1.6 viewmodel (Steam: Counter-Strike, in the Half-Life folder): copied as-is, the game parses it.
+const cs16Knife = join(dirname(dirname(dirname(src))), 'Half-Life', 'cstrike', 'models', 'v_knife.mdl');
+if (existsSync(cs16Knife)) {
+  mkdirSync('public/cs16', { recursive: true });
+  copyFileSync(cs16Knife, 'public/cs16/v_knife.mdl');
+  console.log('CS 1.6 knife: copied v_knife.mdl -> public/cs16');
+} else console.log(`CS 1.6 knife: not found (${cs16Knife}); install Counter-Strike in Steam for the 1.6 viewmodel.`);
+
 if (!lookup) {
   console.log('No CS:GO or CS2 archives found: stock textures skipped.');
   process.exit(0);
