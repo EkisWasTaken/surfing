@@ -356,6 +356,8 @@ export function createRenderer(canvas: HTMLCanvasElement) {
       return null;
     },
     setKnife: (mesh: Parameters<typeof viewmodel.setKnife>[0]) => viewmodel.setKnife(mesh, renderer.extensions.has('EXT_texture_compression_bptc')),
+    inspect: () => viewmodel.inspect(),
+    setArms: (b: Parameters<typeof viewmodel.setArms>[0]) => viewmodel.setArms(b, renderer.extensions.has('EXT_texture_compression_bptc')),
     setFov(fov: number) {
       hfov = fov;
       resize();

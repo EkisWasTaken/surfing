@@ -10,7 +10,9 @@ import { readVpkDir, readVpkFile } from '../src/vpk';
 import { stockFilesFor } from '../src/stock';
 import { createCs2Lookup } from '../src/cs2';
 import { writeZip } from '../src/pak';
-import { readCs2Mesh, meshToJson } from '../src/cs2model';
+import { readCs2Mesh, meshToJson, b64 } from '../src/cs2model';
+import { parseKV3, resourceBlocks } from '../src/kv3';
+import { decodeClip, readNmSkeleton } from '../src/cs2anim';
 
 const src = process.argv[2] ?? 'C:/Program Files (x86)/Steam/steamapps/common/Counter-Strike Global Offensive/csgo/maps';
 if (!existsSync(src)) {
@@ -63,6 +65,19 @@ if (existsSync(cs2Dir)) {
     mkdirSync('public/cs2', { recursive: true });
     writeFileSync('public/cs2/knife.json', JSON.stringify(meshToJson(mesh)));
     console.log(`Knife: ${mesh.positions.length / 3} vertices, ${mesh.groups.length} material(s) -> public/cs2/knife.json`);
+    // Arms + first-person animation: CS2's viewmodel skeleton, its knife clips, and the default glove.
+    const data = (path: string) => parseKV3(resourceBlocks(get(path)!).find((b) => b.type === 'DATA')!.data);
+    const CLIPS = 'animation/anims/viewmodel/knife/_default_knife/';
+    const clips = Object.fromEntries(
+      ['idle_knife', 'draw_knife', 'lookat01_knife'].map((n) => {
+        const c = decodeClip(data(CLIPS + n + '.vnmclip_c'));
+        return [n.replace('_knife', ''), { frames: c.frames, duration: c.duration, poses: b64(new Uint8Array(c.poses.buffer)) }];
+      }),
+    );
+    const arms = await readCs2Mesh(get('agents/models/shared/arms/glove_fullfinger/glove_fullfinger.vmdl_c')!, get, 'viewmodel');
+    const skeleton = readNmSkeleton(data('animation/skeletons/characters/viewmodel.vnmskel_c'));
+    writeFileSync('public/cs2/viewmodel.json', JSON.stringify({ skeleton, clips, arms: meshToJson(arms) }));
+    console.log(`Arms: ${arms.positions.length / 3} vertices, ${skeleton.names.length} bones, clips ${Object.keys(clips).join(', ')} -> public/cs2/viewmodel.json`);
   } catch (e) {
     console.log(`Knife: skipped (${e instanceof Error ? e.message : e})`);
   }

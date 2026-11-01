@@ -6,7 +6,7 @@ import type { MapDef } from './maps';
 import { bspToMap, goalBox, saveGoal } from './maps/imported';
 import { parseBsp } from './bsp';
 import { readZip } from './pak';
-import { meshFromJson } from './cs2model';
+import { meshFromJson, unb64 } from './cs2model';
 import { createGrid } from './grid';
 import { newPlayer, unstick, Player } from './movement';
 import { simTick, touching } from './sim';
@@ -125,6 +125,15 @@ fetch('/cs2/knife.json')
   .then((r) => (r.ok && r.headers.get('content-type')?.includes('json') ? r.json() : null))
   .then((j) => j && renderer.setKnife(meshFromJson(j)))
   .catch(() => {});
+// CS2's arms and first-person knife animations, from the same import.
+fetch('/cs2/viewmodel.json')
+  .then((r) => (r.ok && r.headers.get('content-type')?.includes('json') ? r.json() : null))
+  .then((j) => {
+    if (!j) return;
+    const clips = Object.fromEntries(Object.entries(j.clips as Record<string, { frames: number; duration: number; poses: string }>).map(([k, c]) => [k, { ...c, poses: new Float32Array(unb64(c.poses).buffer) }]));
+    renderer.setArms({ skeleton: j.skeleton, clips, arms: meshFromJson(j.arms) });
+  })
+  .catch((e) => console.warn('viewmodel arms:', e));
 
 fetch('/maps/index.json')
   .then((r) => (r.ok ? r.json() : []))
@@ -146,7 +155,7 @@ window.addEventListener('keydown', (e) => {
     map.endZone = [goalBox(cur.pos)];
     saveGoal(map.id, cur.pos);
     hud.flash('Goal set here');
-  }
+  } else if (e.code === 'KeyF') renderer.inspect(); // CS's inspect key
 });
 window.addEventListener('resize', renderer.resize);
 let last = performance.now();

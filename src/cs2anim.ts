@@ -41,3 +41,13 @@ export function decodeClip(clip: Any): Cs2Clip {
   }
   return { frames, tracks, duration: Number(clip.m_flDuration), poses };
 }
+
+export type NmSkeleton = { names: string[]; parents: number[]; ref: number[][] }; // ref: parent space, same layout as poses
+
+export function readNmSkeleton(skel: Any): NmSkeleton {
+  return {
+    names: (skel.m_boneIDs as string[]).map(String),
+    parents: Array.from(skel.m_parentIndices as number[], Number),
+    ref: (skel.m_parentSpaceReferencePose as number[][]).map((r) => Array.from(r, Number)),
+  };
+}
