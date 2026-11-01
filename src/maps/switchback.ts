@@ -1,6 +1,6 @@
 import { vec } from '../math';
 import { makeBox, makeRamp } from '../brush';
-import { MapDef, startPlatform, lowestZ } from './build';
+import { MapDef, builtin, lowestZ } from './build';
 
 const h = (width: number, angle: number) => width * Math.tan((angle * Math.PI) / 180);
 // A ramp whose slope tops out at `top`.
@@ -19,11 +19,4 @@ const ramps = [
 ];
 const low = lowestZ(ramps);
 
-export const switchback: MapDef = {
-  id: 'switchback',
-  name: 'Switchback (hard)',
-  brushes: [startPlatform(3376), ...ramps, makeBox(vec(9600, 4800, low - 316), vec(10600, 6200, low - 300))],
-  spawn: vec(0, 0, 3377),
-  spawnYaw: 0,
-  killZ: low - 800,
-};
+export const switchback: MapDef = builtin('switchback', 'Switchback (hard)', 3376, ramps, makeBox(vec(9600, 4800, low - 316), vec(10600, 6200, low - 300)));

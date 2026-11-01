@@ -25,6 +25,16 @@ describe.each(maps.map((m) => [m.name, m] as const))('%s', (_, map) => {
     expect(landed).toBe(true);
   });
 
+  it('spawn is inside the start zone', () => {
+    expect(trace(map.spawn, map.spawn, mins, maxs, map.startZone).startSolid).toBe(true);
+  });
+
+  it('goal zone sits on the landing pad', () => {
+    const pad = map.brushes[map.brushes.length - 1];
+    const p = vec((pad.mins.x + pad.maxs.x) / 2, (pad.mins.y + pad.maxs.y) / 2, pad.maxs.z + 1);
+    expect(trace(p, p, mins, maxs, map.endZone!).startSolid).toBe(true);
+  });
+
   it('every ramp slope is surfable (normal.z < 0.7)', () => {
     expect(ramps.length).toBeGreaterThanOrEqual(5);
     for (const r of ramps) expect(slopeOf(r).normal.z).toBeLessThan(0.7);
