@@ -44,10 +44,12 @@ export function createInput(canvas: HTMLCanvasElement) {
     const lock = (opts?: PointerLockOptions) => canvas.requestPointerLock(opts) as unknown as Promise<void> | undefined;
     lock({ unadjustedMovement: true })?.catch?.(() => lock()?.catch?.(() => {}));
   };
-  canvas.addEventListener('click', requestLock);
+  // Only when unlocked: re-requesting while locked fires another lockchange, which used to drop held keys mid-run
+  // (every knife attack click stopped you until W was pressed again).
+  canvas.addEventListener('click', () => !locked() && requestLock());
   document.addEventListener('pointerlockchange', () => {
     filter = mouseFilter();
-    keys.clear();
+    if (!locked()) keys.clear(); // keys released while unlocked never reach us
     listeners.forEach((cb) => cb(locked()));
   });
   document.addEventListener('pointerlockerror', () => listeners.forEach((cb) => cb(false)));
