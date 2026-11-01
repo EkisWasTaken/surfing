@@ -2,3 +2,4 @@ node_modules
 dist
 .superpowers
 public/maps
+public/cs2

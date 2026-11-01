@@ -133,3 +133,21 @@ describe('lz4Block', () => {
     expect(() => lz4Block(new Uint8Array([0x32, 97, 98, 99, 3, 0]), 12)).toThrow();
   });
 });
+
+import { meshToJson, meshFromJson } from '../src/cs2model';
+
+describe('CS2 mesh JSON round trip', () => {
+  it('keeps geometry and texture mips intact', () => {
+    const mesh = {
+      positions: new Float32Array([1, 2, 3, 4.5, 5, 6]),
+      uvs: new Float32Array([0, 1, 0.25, 0.75]),
+      indices: new Uint32Array([0, 1, 1]),
+      groups: [{ start: 0, count: 3, material: 'm.vmat', texture: { width: 4, height: 4, format: 'bc7' as const, mips: [{ width: 4, height: 4, data: new Uint8Array(16).fill(7) }] } }],
+    };
+    const back = meshFromJson(JSON.parse(JSON.stringify(meshToJson(mesh))));
+    expect(Array.from(back.positions)).toEqual([1, 2, 3, 4.5, 5, 6]);
+    expect(Array.from(back.indices)).toEqual([0, 1, 1]);
+    expect(Array.from(back.groups[0].texture!.mips[0].data)).toEqual(new Array(16).fill(7));
+    expect(back.groups[0].texture!.format).toBe('bc7');
+  });
+});

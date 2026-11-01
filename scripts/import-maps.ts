@@ -10,6 +10,7 @@ import { readVpkDir, readVpkFile } from '../src/vpk';
 import { stockFilesFor } from '../src/stock';
 import { createCs2Lookup } from '../src/cs2';
 import { writeZip } from '../src/pak';
+import { readCs2Mesh, meshToJson } from '../src/cs2model';
 
 const src = process.argv[2] ?? 'C:/Program Files (x86)/Steam/steamapps/common/Counter-Strike Global Offensive/csgo/maps';
 if (!existsSync(src)) {
@@ -52,6 +53,21 @@ if (!lookup && existsSync(cs2Dir)) {
   lookup = createCs2Lookup(cs2.entries, cs2.read);
   console.log('Stock textures: converted from CS2 (partial; install csgo_legacy for the exact set).');
 }
+// First-person knife from CS2's own model (written once; maps don't need it).
+if (existsSync(cs2Dir)) {
+  const cs2 = openVpk(cs2Dir);
+  const get = (path: string) => (cs2.entries.has(path) ? cs2.read(path) : undefined);
+  const KNIFE = 'weapons/models/knife/knife_default_ct/weapon_knife_default_ct.vmdl_c';
+  try {
+    const mesh = await readCs2Mesh(get(KNIFE)!, get);
+    mkdirSync('public/cs2', { recursive: true });
+    writeFileSync('public/cs2/knife.json', JSON.stringify(meshToJson(mesh)));
+    console.log(`Knife: ${mesh.positions.length / 3} vertices, ${mesh.groups.length} material(s) -> public/cs2/knife.json`);
+  } catch (e) {
+    console.log(`Knife: skipped (${e instanceof Error ? e.message : e})`);
+  }
+}
+
 if (!lookup) {
   console.log('No CS:GO or CS2 archives found: stock textures skipped.');
   process.exit(0);

@@ -6,6 +6,7 @@ import type { MapDef } from './maps';
 import { bspToMap, goalBox, saveGoal } from './maps/imported';
 import { parseBsp } from './bsp';
 import { readZip } from './pak';
+import { meshFromJson } from './cs2model';
 import { createGrid } from './grid';
 import { newPlayer, unstick, Player } from './movement';
 import { simTick, touching } from './sim';
@@ -118,6 +119,12 @@ async function loadFolderMap(file: string) {
     stock,
   );
 }
+
+// CS2's knife, decoded by `npm run import-maps` from the local CS2 install (absent → no viewmodel).
+fetch('/cs2/knife.json')
+  .then((r) => (r.ok && r.headers.get('content-type')?.includes('json') ? r.json() : null))
+  .then((j) => j && renderer.setKnife(meshFromJson(j)))
+  .catch(() => {});
 
 fetch('/maps/index.json')
   .then((r) => (r.ok ? r.json() : []))

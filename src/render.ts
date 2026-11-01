@@ -355,6 +355,7 @@ export function createRenderer(canvas: HTMLCanvasElement) {
       for (const b of map.brushes) world.add(new THREE.Mesh(b.kind === 'ramp' ? rampGeometry(b) : boxGeometry(b), b.kind === 'ramp' ? rampMat : floorMat));
       return null;
     },
+    setKnife: (mesh: Parameters<typeof viewmodel.setKnife>[0]) => viewmodel.setKnife(mesh, renderer.extensions.has('EXT_texture_compression_bptc')),
     setFov(fov: number) {
       hfov = fov;
       resize();

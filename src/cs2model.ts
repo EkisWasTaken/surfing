@@ -100,3 +100,37 @@ export async function readCs2Mesh(vmdl: Uint8Array, get: Get): Promise<Cs2Mesh> 
   }
   return { positions: new Float32Array(pos), uvs: new Float32Array(uv), indices: new Uint32Array(idx), groups };
 }
+
+// Compact JSON form (typed arrays as base64) so the import step can hand meshes to the browser.
+const b64 = (b: Uint8Array) => {
+  let s = '';
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
+  return btoa(s);
+};
+const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+const bytesOf = (a: Float32Array | Uint32Array) => new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
+
+export type Cs2MeshJson = ReturnType<typeof meshToJson>;
+
+export function meshToJson(m: Cs2Mesh) {
+  return {
+    positions: b64(bytesOf(m.positions)),
+    uvs: b64(bytesOf(m.uvs)),
+    indices: b64(bytesOf(m.indices)),
+    groups: m.groups.map((g) => ({
+      start: g.start,
+      count: g.count,
+      material: g.material,
+      texture: g.texture && { width: g.texture.width, height: g.texture.height, format: g.texture.format, mips: g.texture.mips.map((x) => ({ width: x.width, height: x.height, data: b64(x.data) })) },
+    })),
+  };
+}
+
+export function meshFromJson(j: Cs2MeshJson): Cs2Mesh {
+  return {
+    positions: new Float32Array(unb64(j.positions).buffer),
+    uvs: new Float32Array(unb64(j.uvs).buffer),
+    indices: new Uint32Array(unb64(j.indices).buffer),
+    groups: j.groups.map((g) => ({ ...g, texture: g.texture && { ...g.texture, mips: g.texture.mips.map((x) => ({ ...x, data: unb64(x.data) })) } })),
+  };
+}
