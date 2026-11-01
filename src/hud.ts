@@ -134,7 +134,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
                 <tr><td>Save checkpoint</td><td>1</td></tr>
                 <tr><td>Teleport to checkpoint (practice)</td><td>2</td></tr>
                 <tr><td>Chat (type !help for commands)</td><td>Y</td></tr>
-                <tr><td>Console (kill, retry, map, bind, sv_ settings: type help)</td><td>` (key under Esc)</td></tr>
+                <tr><td>Console (kill, retry, map, bind, sv_ settings: type help)</td><td>&#96; (key under Esc)</td></tr>
                 <tr><td>Open this menu</td><td>Esc</td></tr>
               </tbody>
             </table>
