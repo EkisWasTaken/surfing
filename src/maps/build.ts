@@ -1,6 +1,6 @@
 import { Vec3, vec } from '../math';
 import { Brush, makeBox, makeRamp } from '../brush';
-import type { Teleport } from '../bsp';
+import type { Teleport, BspMap } from '../bsp';
 
 export type MapDef = {
   id: string;
@@ -12,7 +12,8 @@ export type MapDef = {
   startZone: Brush[];
   endZone: Brush[] | null;
   teleports: Teleport[];
-  mesh?: { positions: Float32Array; colors: Float32Array }; // imported maps render this instead of brushes
+  mesh?: BspMap['mesh']; // imported maps render this instead of brushes
+  pak?: BspMap['pak'];
 };
 
 type Section = { angle: number; width: number };

@@ -2,11 +2,14 @@
 // The file is untrusted user input: every offset is bounds-checked by DataView, and failures throw clear errors.
 import { Vec3, vec } from './math';
 import type { Brush, Plane } from './brush';
+import { readZip } from './pak';
 
 export type Teleport = { brushes: Brush[]; dest: Vec3; yaw: number };
 export type BspMap = {
   brushes: Brush[];
-  mesh: { positions: Float32Array; colors: Float32Array };
+  // Triangles sorted by texture; each group is one texture's range of vertices.
+  mesh: { positions: Float32Array; colors: Float32Array; uvs: Float32Array; groups: { texture: string; start: number; count: number }[] };
+  pak: Map<string, Uint8Array>; // files packed in the map (materials, textures)
   spawn: Vec3;
   spawnYaw: number;
   teleports: Teleport[];
@@ -15,7 +18,7 @@ export type BspMap = {
   killZ: number;
 };
 
-const L = { ENTITIES: 0, PLANES: 1, TEXDATA: 2, VERTEXES: 3, NODES: 5, TEXINFO: 6, FACES: 7, LEAFS: 10, EDGES: 12, SURFEDGES: 13, MODELS: 14, LEAFBRUSHES: 17, BRUSHES: 18, BRUSHSIDES: 19, TEXSTR_DATA: 43, TEXSTR_TABLE: 44 };
+const L = { PAKFILE: 40, ENTITIES: 0, PLANES: 1, TEXDATA: 2, VERTEXES: 3, NODES: 5, TEXINFO: 6, FACES: 7, LEAFS: 10, EDGES: 12, SURFEDGES: 13, MODELS: 14, LEAFBRUSHES: 17, BRUSHES: 18, BRUSHSIDES: 19, TEXSTR_DATA: 43, TEXSTR_TABLE: 44 };
 // MASK_PLAYERSOLID: solid | window | grate | playerclip | monster.
 const PLAYER_SOLID = 0x1 | 0x2 | 0x8 | 0x10000 | 0x2000000;
 // sky2d | sky | trigger | nodraw | hint | skip
@@ -136,6 +139,10 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
   return {
     brushes: modelBrushes(0, PLAYER_SOLID),
     mesh: readFaces(),
+    pak: (() => {
+      const { ofs, len } = lump(L.PAKFILE);
+      return readZip(new Uint8Array(buffer, ofs, len));
+    })(),
     spawn: parseVec(spawnEnt?.origin),
     spawnYaw: parseVec(spawnEnt?.angles).y,
     teleports,
@@ -148,8 +155,8 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
     const verts = records(L.VERTEXES, 12, (o) => [f32(o), f32(o + 4), f32(o + 8)]);
     const edges = records(L.EDGES, 4, (o) => [u16(o), u16(o + 2)]);
     const surfedges = records(L.SURFEDGES, 4, i32);
-    const texinfo = records(L.TEXINFO, 72, (o) => ({ flags: i32(o + 64), texdata: i32(o + 68) }));
-    const texdata = records(L.TEXDATA, 32, (o) => ({ color: [f32(o), f32(o + 4), f32(o + 8)], nameId: i32(o + 12) }));
+    const texinfo = records(L.TEXINFO, 72, (o) => ({ s: [f32(o), f32(o + 4), f32(o + 8), f32(o + 12)], t: [f32(o + 16), f32(o + 20), f32(o + 24), f32(o + 28)], flags: i32(o + 64), texdata: i32(o + 68) }));
+    const texdata = records(L.TEXDATA, 32, (o) => ({ color: [f32(o), f32(o + 4), f32(o + 8)], nameId: i32(o + 12), w: i32(o + 16) || 1, h: i32(o + 20) || 1 }));
     const strTable = records(L.TEXSTR_TABLE, 4, i32);
     const { ofs: strOfs, len: strLen } = lump(L.TEXSTR_DATA);
     const texName = (id: number) => {
@@ -159,14 +166,18 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
       return new TextDecoder().decode(new Uint8Array(buffer, start, end - start));
     };
     const faces = records(L.FACES, 56, (o) => ({ plane: u16(o), side: dv.getUint8(o + 2), firstedge: i32(o + 4), numedges: i16(o + 8), texinfo: i16(o + 10) }));
-    const pos: number[] = [], col: number[] = [];
+    const buckets = new Map<string, { pos: number[]; col: number[]; uv: number[] }>();
     const world = models[0];
     for (let fi = world.firstface; fi < world.firstface + world.numfaces && fi < faces.length; fi++) {
       const f = faces[fi];
       const ti = texinfo[f.texinfo];
       if (!ti || ti.flags & HIDDEN_SURF) continue;
       const td = texdata[ti.texdata];
-      if (td && /^tools\//i.test(texName(td.nameId))) continue;
+      const tex = td ? texName(td.nameId) : '';
+      if (/^tools\//i.test(tex)) continue;
+      let bucket = buckets.get(tex);
+      if (!bucket) buckets.set(tex, (bucket = { pos: [], col: [], uv: [] }));
+      const tw = td?.w ?? 1, th = td?.h ?? 1;
       const poly: number[][] = [];
       for (let k = 0; k < f.numedges; k++) {
         const se = surfedges[f.firstedge + k];
@@ -182,9 +193,21 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
         const [a, b, d] = [poly[0], poly[k], poly[k + 1]];
         const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = d[0] - a[0], vy = d[1] - a[1], vz = d[2] - a[2];
         const facing = ((uy * vz - uz * vy) * pn.x + (uz * vx - ux * vz) * pn.y + (ux * vy - uy * vx) * pn.z) * sign;
-        for (const v of facing >= 0 ? [a, b, d] : [a, d, b]) pos.push(...v), col.push(...c);
+        for (const v of facing >= 0 ? [a, b, d] : [a, d, b]) {
+          bucket.pos.push(...v);
+          bucket.col.push(...c);
+          bucket.uv.push((v[0] * ti.s[0] + v[1] * ti.s[1] + v[2] * ti.s[2] + ti.s[3]) / tw, (v[0] * ti.t[0] + v[1] * ti.t[1] + v[2] * ti.t[2] + ti.t[3]) / th);
+        }
       }
     }
-    return { positions: new Float32Array(pos), colors: new Float32Array(col) };
+    const groups: BspMap['mesh']['groups'] = [];
+    const pos: number[] = [], col: number[] = [], uv: number[] = [];
+    for (const [texture, b] of buckets) {
+      if (!b.pos.length) continue;
+      groups.push({ texture, start: pos.length / 3, count: b.pos.length / 3 });
+      for (let i = 0; i < b.pos.length; i++) pos.push(b.pos[i]), col.push(b.col[i]);
+      for (let i = 0; i < b.uv.length; i++) uv.push(b.uv[i]);
+    }
+    return { positions: new Float32Array(pos), colors: new Float32Array(col), uvs: new Float32Array(uv), groups };
   }
 }

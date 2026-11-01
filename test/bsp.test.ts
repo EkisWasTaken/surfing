@@ -75,6 +75,15 @@ describe('parseBsp', () => {
     }
   });
 
+  it('computes texture UVs from texinfo axes and groups triangles by texture', () => {
+    const m = parseBsp(file(), 'test');
+    // s = x / 128, t = -y / 128; first vertex is (-512, -512, 0)
+    expect(Array.from(m.mesh.uvs.slice(0, 2))).toEqual([-4, 4]);
+    expect(m.mesh.uvs.length).toBe((m.mesh.positions.length / 3) * 2);
+    expect(m.mesh.groups).toEqual([{ texture: 'CONCRETE/FLOOR', start: 0, count: 6 }]);
+    expect(m.pak).toBeInstanceOf(Map);
+  });
+
   it('rejects non-BSP and compressed files with a clear error', () => {
     expect(() => parseBsp(buildBsp({ entities, world: [floor], submodels: [], ident: 'NOPE' }), 'x')).toThrow(/not a Source BSP/);
     expect(() => parseBsp(buildBsp({ entities, world: [floor], submodels: [], lzmaLump: true }), 'x')).toThrow(/compressed/);

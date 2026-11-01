@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import type { Brush } from './brush';
 import type { Vec3 } from './math';
 import { sandstone, limestone } from './textures';
+import { mapMaterials } from './mapMaterials';
+import type { BspMap } from './bsp';
 
 // The only place Source coords (x fwd, y left, z up) become three.js coords (x, y up, z).
 const toThree = (v: Vec3) => new THREE.Vector3(v.x, v.z, -v.y);
@@ -119,7 +121,7 @@ export function rampGeometry(b: Brush): THREE.BufferGeometry {
 }
 
 // Source-space triangle soup to three.js space (x, z, -y), flat-shaded.
-function bspGeometry(positions: Float32Array, colors: Float32Array): THREE.BufferGeometry {
+function bspGeometry({ positions, colors, uvs, groups }: BspMap['mesh']): THREE.BufferGeometry {
   const p = new Float32Array(positions.length);
   for (let i = 0; i < p.length; i += 3) {
     p[i] = positions[i];
@@ -129,6 +131,8 @@ function bspGeometry(positions: Float32Array, colors: Float32Array): THREE.Buffe
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.BufferAttribute(p, 3));
   g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  g.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  groups.forEach((gr, i) => g.addGroup(gr.start, gr.count, i));
   g.computeVertexNormals();
   return g;
 }
@@ -152,6 +156,8 @@ export function createRenderer(canvas: HTMLCanvasElement) {
   const rampMat = surfaceMaterial(sandstone(), 256);
   const floorMat = surfaceMaterial(limestone(), 256);
   const bspMat = surfaceMaterial(sandstone(), 256, limestone());
+  const s3tc = renderer.extensions.has('WEBGL_compressed_texture_s3tc');
+  let mapMats: THREE.Material[] = [];
   const world = new THREE.Group();
   scene.add(world);
   let hfov = 90;
@@ -166,11 +172,19 @@ export function createRenderer(canvas: HTMLCanvasElement) {
   resize();
 
   return {
-    setMap(map: { brushes: Brush[]; mesh?: { positions: Float32Array; colors: Float32Array } }) {
+    setMap(map: { brushes: Brush[]; mesh?: BspMap['mesh']; pak?: BspMap['pak'] }) {
       for (const m of world.children as THREE.Mesh[]) m.geometry.dispose();
+      for (const m of mapMats) {
+        (m as THREE.ShaderMaterial).uniforms.map?.value?.dispose();
+        m.dispose();
+      }
+      mapMats = [];
       world.clear();
       if (map.mesh) {
-        world.add(new THREE.Mesh(bspGeometry(map.mesh.positions, map.mesh.colors), bspMat));
+        // The map's own textures where packed and decodable, desert fallback elsewhere.
+        const own = mapMaterials(map.mesh.groups.map((g) => g.texture), map.pak ?? new Map(), s3tc, SUN, HORIZON);
+        mapMats = own.filter((m): m is THREE.Material => !!m);
+        world.add(new THREE.Mesh(bspGeometry(map.mesh), own.map((m) => m ?? bspMat)));
         return;
       }
       for (const b of map.brushes) world.add(new THREE.Mesh(b.kind === 'ramp' ? rampGeometry(b) : boxGeometry(b), b.kind === 'ramp' ? rampMat : floorMat));

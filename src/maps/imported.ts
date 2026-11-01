@@ -40,5 +40,6 @@ export function bspToMap(bsp: BspMap, fileName: string): MapDef & { goalFromMap:
     goalFromMap: !!bsp.endZone,
     teleports: bsp.teleports,
     mesh: bsp.mesh,
+    pak: bsp.pak,
   };
 }

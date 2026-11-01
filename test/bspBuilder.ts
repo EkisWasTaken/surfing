@@ -69,10 +69,10 @@ export function buildBsp(opts: {
   const lumps: Lump[] = [
     { index: 0, bytes: new TextEncoder().encode(opts.entities + '\0') },
     { index: 1, size: 20, count: planes.length, write: (dv, o, i) => { planes[i].n.forEach((v, k) => dv.setFloat32(o + k * 4, v, true)); dv.setFloat32(o + 12, planes[i].d, true); } },
-    { index: 2, size: 32, count: faces.length, write: (dv, o, i) => { faces[i].reflectivity.forEach((v, k) => dv.setFloat32(o + k * 4, v, true)); dv.setInt32(o + 12, i, true); } },
+    { index: 2, size: 32, count: faces.length, write: (dv, o, i) => { faces[i].reflectivity.forEach((v, k) => dv.setFloat32(o + k * 4, v, true)); dv.setInt32(o + 12, i, true); dv.setInt32(o + 16, 128, true); dv.setInt32(o + 20, 128, true); } },
     { index: 3, size: 12, count: verts.length, write: (dv, o, i) => verts[i].forEach((v, k) => dv.setFloat32(o + k * 4, v, true)) },
     { index: 5, size: 32, count: models.length, write: (dv, o, i) => { dv.setInt32(o + 4, -(i + 1), true); dv.setInt32(o + 8, -(i + 1), true); } },
-    { index: 6, size: 72, count: faces.length, write: (dv, o, i) => { dv.setInt32(o + 64, faces[i].flags, true); dv.setInt32(o + 68, i, true); } },
+    { index: 6, size: 72, count: faces.length, write: (dv, o, i) => { dv.setFloat32(o, 1, true); dv.setFloat32(o + 20, -1, true); dv.setInt32(o + 64, faces[i].flags, true); dv.setInt32(o + 68, i, true); } },
     { index: 7, size: 56, count: faceRecs.length, write: (dv, o, i) => { dv.setUint16(o, faceRecs[i].plane, true); dv.setInt32(o + 4, faceRecs[i].firstedge, true); dv.setInt16(o + 8, faceRecs[i].numedges, true); dv.setInt16(o + 10, faceRecs[i].texinfo, true); dv.setInt16(o + 12, -1, true); } },
     { index: 10, size: 32, count: leafs.length, write: (dv, o, i) => { dv.setInt32(o, 1, true); dv.setUint16(o + 24, leafs[i].first, true); dv.setUint16(o + 26, leafs[i].num, true); } },
     { index: 12, size: 4, count: edges.length, write: (dv, o, i) => { dv.setUint16(o, edges[i][0], true); dv.setUint16(o + 2, edges[i][1], true); } },
