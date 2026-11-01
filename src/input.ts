@@ -28,12 +28,13 @@ export function createInput(canvas: HTMLCanvasElement) {
   const listeners: ((locked: boolean) => void)[] = [];
   const locked = () => document.pointerLockElement === canvas;
 
-  canvas.addEventListener('click', () => {
+  const requestLock = () => {
     // Raw input where supported (matches CS:GO raw input); fall back to plain lock.
     // Failures surface via 'pointerlockerror', so the promises only need their rejections swallowed.
     const lock = (opts?: PointerLockOptions) => canvas.requestPointerLock(opts) as unknown as Promise<void> | undefined;
     lock({ unadjustedMovement: true })?.catch?.(() => lock()?.catch?.(() => {}));
-  });
+  };
+  canvas.addEventListener('click', requestLock);
   document.addEventListener('pointerlockchange', () => {
     filter = mouseFilter();
     keys.clear();
@@ -65,6 +66,7 @@ export function createInput(canvas: HTMLCanvasElement) {
       pitch,
     }),
     locked,
+    requestLock,
     onLockChange: (cb: (locked: boolean) => void) => listeners.push(cb),
     setView(y: number, p: number) {
       yaw = y;

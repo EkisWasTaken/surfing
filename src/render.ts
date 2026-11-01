@@ -1,31 +1,83 @@
 import * as THREE from 'three';
 import type { Brush } from './brush';
 import type { Vec3 } from './math';
+import { sandstone, limestone } from './textures';
 
 // The only place Source coords (x fwd, y left, z up) become three.js coords (x, y up, z).
 const toThree = (v: Vec3) => new THREE.Vector3(v.x, v.z, -v.y);
 const DEG = Math.PI / 180;
 
-// World-space 64u grid with simple directional shading, so speed and slope read clearly.
-const material = new THREE.ShaderMaterial({
-  uniforms: { color: { value: new THREE.Color(0x8fa3b8) } },
-  vertexShader: /* glsl */ `
-    varying vec3 vWorld; varying vec3 vNormal;
-    void main() {
-      vec4 w = modelMatrix * vec4(position, 1.0);
-      vWorld = w.xyz; vNormal = normalize(mat3(modelMatrix) * normal);
-      gl_Position = projectionMatrix * viewMatrix * w;
-    }`,
-  fragmentShader: /* glsl */ `
-    uniform vec3 color; varying vec3 vWorld; varying vec3 vNormal;
-    float grid(vec2 p) { vec2 g = abs(fract(p / 64.0 - 0.5) - 0.5) / fwidth(p / 64.0); return 1.0 - min(min(g.x, g.y), 1.0); }
-    void main() {
-      vec3 n = abs(vNormal);
-      float line = n.x > n.y && n.x > n.z ? grid(vWorld.yz) : n.y > n.z ? grid(vWorld.xz) : grid(vWorld.xy);
-      float light = 0.45 + 0.55 * max(dot(normalize(vNormal), normalize(vec3(0.4, 1.0, 0.3))), 0.0);
-      gl_FragColor = vec4(mix(color * light, vec3(0.08, 0.1, 0.14), line * 0.6), 1.0);
-    }`,
-});
+const SUN = new THREE.Vector3(0.45, 0.42, -0.79).normalize();
+const HORIZON = new THREE.Color('#f0d2a0');
+const ZENITH = new THREE.Color('#5a8cc2');
+const GROUND = new THREE.Color('#c6a273');
+
+// Triplanar world-space texturing (one texture repeat per `scale` units), sun shading, distance haze.
+function surfaceMaterial(image: HTMLCanvasElement, scale: number) {
+  const map = new THREE.CanvasTexture(image);
+  map.wrapS = map.wrapT = THREE.RepeatWrapping;
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.anisotropy = 8;
+  return new THREE.ShaderMaterial({
+    uniforms: { map: { value: map }, scale: { value: scale }, sun: { value: SUN }, haze: { value: HORIZON } },
+    vertexShader: /* glsl */ `
+      varying vec3 vWorld; varying vec3 vNormal;
+      void main() {
+        vec4 w = modelMatrix * vec4(position, 1.0);
+        vWorld = w.xyz; vNormal = normalize(mat3(modelMatrix) * normal);
+        gl_Position = projectionMatrix * viewMatrix * w;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform sampler2D map; uniform float scale; uniform vec3 sun; uniform vec3 haze;
+      varying vec3 vWorld; varying vec3 vNormal;
+      void main() {
+        vec3 n = normalize(vNormal);
+        vec3 w = pow(abs(n), vec3(4.0)); w /= w.x + w.y + w.z;
+        vec3 p = vWorld / scale;
+        vec3 albedo = texture2D(map, p.zy).rgb * w.x + texture2D(map, p.xz).rgb * w.y + texture2D(map, p.xy).rgb * w.z;
+        float diffuse = max(dot(n, sun), 0.0);
+        vec3 color = albedo * (vec3(0.42, 0.38, 0.36) + vec3(1.0, 0.9, 0.75) * diffuse * 0.85);
+        float fog = 1.0 - exp(-length(vWorld - cameraPosition) / 24000.0);
+        gl_FragColor = vec4(mix(color, haze, fog * 0.75), 1.0);
+        #include <colorspace_fragment>
+      }`,
+  });
+}
+
+// Sky dome: warm gradient, sun disc + glow, drifting-free procedural clouds.
+function skyMesh() {
+  return new THREE.Mesh(
+    new THREE.SphereGeometry(1, 32, 16),
+    new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      uniforms: { sun: { value: SUN }, horizon: { value: HORIZON }, zenith: { value: ZENITH }, ground: { value: GROUND } },
+      vertexShader: /* glsl */ `
+        varying vec3 vDir;
+        void main() { vDir = position; gl_Position = (projectionMatrix * modelViewMatrix * vec4(position, 1.0)).xyww; }`,
+      fragmentShader: /* glsl */ `
+        uniform vec3 sun; uniform vec3 horizon; uniform vec3 zenith; uniform vec3 ground; varying vec3 vDir;
+        float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+        float noise(vec2 p) {
+          vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+          return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
+        }
+        float fbm(vec2 p) { float v = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { v += a * noise(p); p *= 2.03; a *= 0.5; } return v; }
+        void main() {
+          vec3 d = normalize(vDir);
+          vec3 sky = d.y > 0.0 ? mix(horizon, zenith, pow(d.y, 0.55)) : mix(horizon, ground, min(-d.y * 6.0, 1.0));
+          if (d.y > 0.02) {
+            float c = smoothstep(0.55, 0.85, fbm(d.xz / (d.y + 0.15) * 1.6));
+            sky = mix(sky, vec3(1.0, 0.97, 0.92), c * smoothstep(0.02, 0.2, d.y) * 0.8);
+          }
+          float s = max(dot(d, sun), 0.0);
+          sky += vec3(1.0, 0.85, 0.6) * (pow(s, 600.0) * 4.0 + pow(s, 12.0) * 0.25);
+          gl_FragColor = vec4(sky, 1.0);
+          #include <colorspace_fragment>
+        }`,
+    }),
+  );
+}
 
 export function rampGeometry(b: Brush): THREE.BufferGeometry {
   const [a0, a1, a2, b0, b1, b2] = b.corners!.map(toThree);
@@ -55,41 +107,44 @@ function boxGeometry(b: Brush): THREE.BufferGeometry {
   return g.translate(c.x, c.y, c.z);
 }
 
-function sky(): THREE.Texture {
-  const c = document.createElement('canvas');
-  c.width = 2;
-  c.height = 256;
-  const ctx = c.getContext('2d')!;
-  const grad = ctx.createLinearGradient(0, 0, 0, 256);
-  grad.addColorStop(0, '#2b4a78');
-  grad.addColorStop(1, '#c9d9ea');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, 2, 256);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
-
-export function createRenderer(canvas: HTMLCanvasElement, brushes: Brush[]) {
+export function createRenderer(canvas: HTMLCanvasElement) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio);
   const scene = new THREE.Scene();
-  scene.background = sky();
-  // ~90° horizontal at 4:3, CS:GO default.
-  const camera = new THREE.PerspectiveCamera(74, 1, 4, 100000);
+  const sky = skyMesh();
+  sky.scale.setScalar(50000);
+  sky.renderOrder = -1;
+  scene.add(sky);
+  const camera = new THREE.PerspectiveCamera(74, 1, 4, 120000);
   camera.rotation.order = 'YXZ';
-  for (const b of brushes) scene.add(new THREE.Mesh(b.kind === 'ramp' ? rampGeometry(b) : boxGeometry(b), material));
+  const rampMat = surfaceMaterial(sandstone(), 256);
+  const floorMat = surfaceMaterial(limestone(), 256);
+  const world = new THREE.Group();
+  scene.add(world);
+  let hfov = 90;
 
   const resize = () => {
     renderer.setSize(window.innerWidth, window.innerHeight, false);
     camera.aspect = window.innerWidth / window.innerHeight;
+    // CS:GO fov is horizontal at 4:3; wider screens see more to the sides.
+    camera.fov = 2 * Math.atan(Math.tan((hfov * DEG) / 2) * 0.75) / DEG;
     camera.updateProjectionMatrix();
   };
   resize();
 
   return {
+    setMap(brushes: Brush[]) {
+      for (const m of world.children as THREE.Mesh[]) m.geometry.dispose();
+      world.clear();
+      for (const b of brushes) world.add(new THREE.Mesh(b.kind === 'ramp' ? rampGeometry(b) : boxGeometry(b), b.kind === 'ramp' ? rampMat : floorMat));
+    },
+    setFov(fov: number) {
+      hfov = fov;
+      resize();
+    },
     draw(eye: Vec3, yaw: number, pitch: number) {
       camera.position.copy(toThree(eye));
+      sky.position.copy(camera.position);
       camera.rotation.y = (yaw - 90) * DEG; // Source yaw 0 = +X; three's camera faces -Z
       camera.rotation.x = -pitch * DEG; // Source positive pitch looks down
       renderer.render(scene, camera);
