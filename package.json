@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "test": "vitest run"
+    "test": "vitest run",
+    "import-maps": "node scripts/import-maps.mjs"
   },
   "dependencies": {
     "three": "^0.170.0"

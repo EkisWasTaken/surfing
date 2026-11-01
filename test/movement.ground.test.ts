@@ -99,9 +99,9 @@ describe('autobhop off', () => {
 import { unstick } from '../src/movement';
 
 describe('unstick', () => {
-  it('lifts a point sitting exactly on a floor surface until the hull fits', () => {
-    const p = unstick(vec(0, 0, 0), [floor]);
-    expect(p.z).toBeGreaterThan(0);
+  it('lifts a point sunk slightly into the floor until the hull fits', () => {
+    const p = unstick(vec(0, 0, -2), [floor]);
+    expect(p.z).toBeGreaterThanOrEqual(0);
     expect(p.z).toBeLessThanOrEqual(4);
   });
   it('leaves a free point alone', () => {
@@ -117,5 +117,31 @@ describe('CS:GO walk and crouch speeds', () => {
   it('crouch-walking caps at 250 × 0.34', () => {
     const p = run(grounded(vec(0, 0, 1), [floor]), { ...idle, forward: 1, duck: true }, [floor], 200);
     expect(Math.hypot(p.vel.x, p.vel.y)).toBeCloseTo(85, 0);
+  });
+});
+
+import { embedded } from '../src/movement';
+
+describe('embedded vs touching', () => {
+  const ceiling = makeBox(vec(-100, -100, 72), vec(100, 100, 80));
+  it('touching a floor and a ceiling exactly is not stuck (Source lets you move out)', () => {
+    expect(embedded(vec(0, 0, 0), false, [floor, ceiling])).toBe(false);
+    expect(unstick(vec(0, 0, 0), [floor, ceiling])).toEqual(vec(0, 0, 0)); // lifting would push the head into the ceiling
+  });
+  it('really overlapping geometry is stuck', () => {
+    expect(embedded(vec(0, 0, -4), false, [floor])).toBe(true);
+  });
+});
+
+describe('unstick (Source spawns 1u above the spot)', () => {
+  it('lifts a spot resting exactly on a floor by 1 unit, so the player can move', () => {
+    const p = unstick(vec(0, 0, 0), [floor]);
+    expect(p.z).toBeCloseTo(1, 6);
+    const moved = run(newPlayer(p), { ...idle, forward: 1 }, [floor], 32);
+    expect(moved.pos.x).toBeGreaterThan(10);
+  });
+  it('lowers a spot whose head touches a ceiling', () => {
+    const ceiling = makeBox(vec(-100, -100, 172), vec(100, 100, 180));
+    expect(unstick(vec(0, 0, 100), [floor, ceiling]).z).toBeCloseTo(99, 6);
   });
 });

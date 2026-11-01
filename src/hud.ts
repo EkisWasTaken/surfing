@@ -129,9 +129,9 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       status.textContent = msg;
       status.classList.toggle('error', error);
     },
-    addMap(m: { id: string; name: string }) {
-      let opt = [...el.map.options].find((o) => o.value === m.id);
-      if (!opt) el.map.add((opt = new Option(m.name, m.id)));
+    addMap(m: { id: string; name: string }, select = true) {
+      if (![...el.map.options].some((o) => o.value === m.id)) el.map.add(new Option(m.name, m.id));
+      if (!select) return;
       el.map.value = m.id;
       cur = { ...cur, map: m.id };
     },

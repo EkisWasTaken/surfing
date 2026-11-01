@@ -1,15 +1,14 @@
 import './style.css';
 import { config } from './config';
-import { vec, add, sub, scale, Vec3 } from './math';
-import type { Brush } from './brush';
+import { vec, add, sub, scale } from './math';
 import { maps as builtins, findMap } from './maps';
 import type { MapDef } from './maps';
 import { bspToMap, goalBox, saveGoal } from './maps/imported';
 import { parseBsp } from './bsp';
 import { createGrid } from './grid';
-import { step, newPlayer, unstick, applyPush, Player } from './movement';
+import { newPlayer, unstick, Player } from './movement';
+import { simTick, touching } from './sim';
 import type { Push } from './bsp';
-import { trace } from './trace';
 import { createAccumulator, tickYaw } from './loop';
 import { createInput } from './input';
 import { createRenderer } from './render';
@@ -23,6 +22,7 @@ const renderer = createRenderer(canvas);
 const maps: (MapDef & { goalFromMap?: boolean })[] = [...builtins];
 
 let settings = loadSettings();
+const wantedMap = settings.map; // may be a maps-folder map, loaded once the folder list arrives
 let map = findMap(settings.map);
 settings = { ...settings, map: map.id };
 applySettings(settings);
@@ -35,12 +35,6 @@ let run: Run = newRun();
 let best = loadBest(map.id);
 let inOncePush = new Set<Push>(); // once-pushes touched last tick, so the impulse fires on entry only
 let lastTickYaw = 0; // yaw the previous tick used, for spreading mouse turn across ticks
-
-const touching = (p: Player, zone: Brush[] | null) => {
-  if (!zone) return false;
-  const h = p.ducked ? config.hullDuck : config.hullStand;
-  return trace(p.pos, p.pos, h.mins, h.maxs, zone).startSolid;
-};
 
 function respawn() {
   prev = cur = newPlayer(map.spawn);
@@ -71,25 +65,48 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
     input.setJumpBind(next.jumpBind);
     renderer.setFov(next.fov);
     if (tickChanged) acc = createAccumulator(1 / config.tickrate);
-    if (mapChanged) useMap(maps.find((m) => m.id === next.map) ?? maps[0]);
+    if (!mapChanged) return;
+    const known = maps.find((m) => m.id === next.map);
+    if (known) useMap(known);
+    else if (next.map.startsWith('bsp:')) loadFolderMap(next.map.slice(4));
+    else useMap(maps[0]);
   },
-  async onLoadFile(file: File) {
-    hud.setStatus(`Loading ${file.name}…`);
-    try {
-      const m = bspToMap(parseBsp(await file.arrayBuffer(), file.name), file.name);
-      const i = maps.findIndex((x) => x.id === m.id);
-      if (i >= 0) maps[i] = m;
-      else maps.push(m);
-      hud.addMap(m);
-      settings = { ...settings, map: m.id };
-      useMap(m);
-      const goal = m.goalFromMap ? 'goal found in map' : m.endZone ? 'using your saved goal' : 'no goal in map — press F at the finish to set one';
-      hud.setStatus(`Loaded ${m.brushes.length} brushes, ${m.teleports.length} teleports; ${goal}.`);
-    } catch (e) {
-      hud.setStatus(e instanceof Error ? e.message : String(e), true);
-    }
-  },
+  onLoadFile: async (file: File) => loadBsp(() => file.arrayBuffer(), file.name),
 });
+
+async function loadBsp(read: () => Promise<ArrayBuffer>, name: string) {
+  hud.setStatus(`Loading ${name}…`);
+  try {
+    const m = bspToMap(parseBsp(await read(), name), name);
+    const i = maps.findIndex((x) => x.id === m.id);
+    if (i >= 0) maps[i] = m;
+    else maps.push(m);
+    hud.addMap(m);
+    settings = { ...settings, map: m.id };
+    saveSettings(settings);
+    useMap(m);
+    const goal = m.goalFromMap ? 'goal found in map' : m.endZone ? 'using your saved goal' : 'no goal in map — press F at the finish to set one';
+    hud.setStatus(`Loaded ${m.brushes.length} brushes, ${m.teleports.length} teleports, ${m.pushes.length} boosters; ${goal}.`);
+  } catch (e) {
+    hud.setStatus(e instanceof Error ? e.message : String(e), true);
+  }
+}
+
+// Maps folder (public/maps, filled by `npm run import-maps`), served by the dev server.
+const loadFolderMap = (file: string) =>
+  loadBsp(async () => {
+    const res = await fetch(`/maps/${encodeURIComponent(file)}`);
+    if (!res.ok) throw new Error(`${file} isn't in the maps folder anymore`);
+    return res.arrayBuffer();
+  }, file);
+
+fetch('/maps/index.json')
+  .then((r) => (r.ok ? r.json() : []))
+  .then((files: string[]) => {
+    for (const f of files) hud.addMap({ id: `bsp:${f}`, name: `CS:GO: ${f.replace(/\.bsp$/i, '')}` }, false);
+    if (wantedMap.startsWith('bsp:') && files.includes(wantedMap.slice(4))) loadFolderMap(wantedMap.slice(4));
+  })
+  .catch(() => {}); // no dev server endpoint (e.g. static build): built-in maps and file loading still work
 
 input.onLockChange((locked) => {
   hud.showOverlay(!locked);
@@ -115,27 +132,15 @@ document.addEventListener('visibilitychange', () => {
 const eye = (p: Player) => add(p.pos, vec(0, 0, p.ducked ? config.eyeDuck : config.eyeStand));
 
 function tick(cmd: ReturnType<typeof input.cmd>, tickDt: number) {
-  // Only brushes near the player: enough margin for this tick's travel plus step and ground checks.
-  const r = 256 + Math.hypot(cur.vel.x, cur.vel.y, cur.vel.z) * tickDt * 2;
-  const near = grid.query(sub(cur.pos, vec(r, r, r)), add(cur.pos, vec(r, r, r + 128)));
   prev = cur;
-  cur = step(cur, cmd, near, tickDt);
-  if (cur.pos.z < map.killZ || touching(cur, near) || touching(cur, map.hurts)) return respawn();
-  // Boosters: summed base velocity while inside; "once" pushes give one impulse on entry.
-  const inPush = map.pushes.filter((p) => touching(cur, p.brushes));
-  let push: Vec3 | null = null;
-  for (const p of inPush) {
-    if (!p.once) push = add(push ?? vec(), p.vel);
-    else if (!inOncePush.has(p)) cur = { ...cur, vel: add(cur.vel, p.vel) };
-  }
-  inOncePush = new Set(inPush.filter((p) => p.once));
-  cur = applyPush(cur, push, tickDt);
-  const tp = map.teleports.find((t) => touching(cur, t.brushes));
-  if (tp) {
-    // Source's trigger_teleport zeroes velocity (no landmark), so stage resets stop you.
-    prev = cur = { ...newPlayer(unstick(tp.dest, grid.query(sub(tp.dest, vec(256, 256, 256)), add(tp.dest, vec(256, 256, 256))))), ducked: cur.ducked };
-    input.setView(tp.yaw, input.view().pitch);
-    lastTickYaw = tp.yaw;
+  const r = simTick(map, grid, cur, cmd, tickDt, inOncePush);
+  if (r.event === 'respawn') return respawn();
+  cur = r.player;
+  inOncePush = r.oncePushes;
+  if (r.teleport) {
+    prev = cur;
+    input.setView(r.teleport.yaw, input.view().pitch);
+    lastTickYaw = r.teleport.yaw;
   }
   const was = run.phase;
   run = tickRun(run, touching(cur, map.startZone), touching(cur, map.endZone), tickDt);

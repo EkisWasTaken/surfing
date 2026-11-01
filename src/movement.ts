@@ -16,12 +16,27 @@ const DUCK_MODIFIER = 0.34;
 
 export const newPlayer = (pos: Vec3): Player => ({ pos: copy(pos), vel: vec(), onGround: false, ducked: false, groundNormal: null, jumpHeld: false, baseVel: vec() });
 
-// Map spawns and teleport destinations often sit exactly on a floor (counts as inside): lift until the hull fits.
+// Really inside geometry, not just touching it: the trace counts exact contact as inside (as Quake/Source do),
+// but Source still lets a touching player move away, so stuck checks shrink the hull by a hair.
+const TOUCH_TOLERANCE = 0.125;
+export function embedded(pos: Vec3, ducked: boolean, brushes: Brush[]): boolean {
+  const { mins, maxs } = ducked ? config.hullDuck : config.hullStand;
+  const t = vec(TOUCH_TOLERANCE, TOUCH_TOLERANCE, TOUCH_TOLERANCE);
+  return trace(pos, pos, add(mins, t), sub(maxs, t), brushes).startSolid;
+}
+
+// Spawns and teleport destinations often rest exactly on a floor (or touch a ceiling). A player starting in
+// contact can't move, so find the nearest clear spot: up first (Source spawns players 1u above the spot), then down.
 export function unstick(pos: Vec3, brushes: Brush[]): Vec3 {
   const { mins, maxs } = config.hullStand;
-  let p = pos;
-  for (let dz = 0; dz < 72 && trace(p, p, mins, maxs, brushes).startSolid; dz += 4) p = add(p, vec(0, 0, 4));
-  return p;
+  const clear = (p: Vec3) => !trace(p, p, mins, maxs, brushes).startSolid;
+  if (clear(pos)) return pos;
+  for (const dir of [1, -1])
+    for (let dz = 1; dz <= 72; dz++) {
+      const p = add(pos, vec(0, 0, dir * dz));
+      if (clear(p)) return p;
+    }
+  return pos; // nothing clear nearby: leave it as the map placed it
 }
 
 export function clipVelocity(v: Vec3, n: Vec3, overbounce: number): Vec3 {
