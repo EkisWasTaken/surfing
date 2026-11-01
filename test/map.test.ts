@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { brushes, spawn } from '../src/map';
+import { slopeOf } from '../src/brush';
 import { trace } from '../src/trace';
 import { step, newPlayer } from '../src/movement';
 import { config } from '../src/config';
@@ -37,7 +38,7 @@ describe('map', () => {
     const ramps = brushes.filter((b) => b.kind === 'ramp');
     expect(ramps.length).toBeGreaterThanOrEqual(5);
     for (const r of ramps) {
-      const slope = r.planes.find((p) => p.normal.z > 0)!;
+      const slope = slopeOf(r);
       expect(slope.normal.z).toBeLessThan(0.7);
     }
   });

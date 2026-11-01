@@ -67,3 +67,18 @@ describe('ramp bevels', () => {
     expect(t.fraction).toBe(1);
   });
 });
+
+describe('ramps along Y', () => {
+  it('left ramp along +Y faces -X and spans x∈[0,width], y∈[0,length]', () => {
+    const r = makeRamp(vec(0, 0, 0), 512, 256, 256, 'left', 'y');
+    expect(r.maxs).toEqual({ x: 256, y: 512, z: 256 });
+    const slope = r.planes.find((p) => p.normal.z > 0 && p.normal.z < 0.99)!;
+    expect(slope.normal.x).toBeCloseTo(-Math.SQRT1_2, 4);
+    expect(slope.normal.y).toBeCloseTo(0, 6);
+  });
+  it('right ramp along +Y faces +X', () => {
+    const r = makeRamp(vec(0, 0, 0), 512, 256, 256, 'right', 'y');
+    const slope = r.planes.find((p) => p.normal.z > 0 && p.normal.z < 0.99)!;
+    expect(slope.normal.x).toBeCloseTo(Math.SQRT1_2, 4);
+  });
+});

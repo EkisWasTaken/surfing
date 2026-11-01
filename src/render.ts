@@ -28,20 +28,20 @@ const material = new THREE.ShaderMaterial({
 });
 
 export function rampGeometry(b: Brush): THREE.BufferGeometry {
-  const { mins: o, maxs: m } = b;
-  const left = b.side === 'left';
-  const wallY = left ? o.y : m.y, footY = left ? m.y : o.y;
-  // Triangle cross-section: bottom of wall, top of wall, slope foot; extruded along X.
-  const tri = (x: number) => [toThree({ x, y: wallY, z: o.z }), toThree({ x, y: wallY, z: m.z }), toThree({ x, y: footY, z: o.z })];
-  const [a0, a1, a2] = tri(o.x), [b0, b1, b2] = tri(m.x);
+  const [a0, a1, a2, b0, b1, b2] = b.corners!.map(toThree);
   const faces = [
     [a0, a2, a1], [b0, b1, b2], // end caps
     [a0, a1, b1], [a0, b1, b0], // wall
     [a1, a2, b2], [a1, b2, b1], // slope
     [a0, b0, b2], [a0, b2, a2], // bottom
   ];
-  // Mirroring a right ramp into a left one flips handedness, so flip the winding back.
-  const wound = left ? faces.map(([a, b, c]) => [a, c, b]) : faces;
+  // Orientation depends on side/axis, so wind each face away from the prism's centre.
+  const center = [a0, a1, a2, b0, b1, b2].reduce((s, v) => s.add(v), new THREE.Vector3()).divideScalar(6);
+  const wound = faces.map(([p, q, r]) => {
+    const n = new THREE.Vector3().subVectors(q, p).cross(new THREE.Vector3().subVectors(r, p));
+    const out = new THREE.Vector3().addVectors(p, q).add(r).divideScalar(3).sub(center);
+    return n.dot(out) > 0 ? [p, q, r] : [p, r, q];
+  });
   const pos = wound.flatMap((f) => f.flatMap((v) => [v.x, v.y, v.z]));
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));

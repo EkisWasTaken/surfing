@@ -4,8 +4,13 @@ import { makeRamp } from '../src/brush';
 import { rampGeometry } from '../src/render';
 
 describe('rampGeometry', () => {
-  it.each(['left', 'right'] as const)('%s ramp faces wind outward', (side) => {
-    const pos = rampGeometry(makeRamp(vec(0, 0, 0), 512, 256, 300, side)).getAttribute('position');
+  it.each([
+    ['left', 'x'],
+    ['right', 'x'],
+    ['left', 'y'],
+    ['right', 'y'],
+  ] as const)('%s ramp along %s winds outward', (side, axis) => {
+    const pos = rampGeometry(makeRamp(vec(0, 0, 0), 512, 256, 300, side, axis)).getAttribute('position');
     const pts = Array.from({ length: pos.count }, (_, i) => [pos.getX(i), pos.getY(i), pos.getZ(i)]);
     const center = [0, 1, 2].map((k) => pts.reduce((s, p) => s + p[k], 0) / pts.length);
     for (let i = 0; i < pts.length; i += 3) {
