@@ -1,27 +1,28 @@
 // Playability check for every map in public/maps (filled by `npm run import-maps`). Skips when the folder is empty.
 // Runs the real game tick (src/sim.ts) with bots; prints a per-map report and fails on hard breakage.
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { setGameMode, GameMode } from '../src/config';
 import { readFileSync, readdirSync, existsSync } from 'fs';
 import { parseBsp } from '../src/bsp';
 import { bspToMap } from '../src/maps/imported';
 import { createGrid } from '../src/grid';
-import { simTick, touching, TickResult } from '../src/sim';
+import { simTick, touching, newTickState } from '../src/sim';
 import { newPlayer, unstick, embedded, Cmd, Player } from '../src/movement';
 import type { MapDef } from '../src/maps/build';
 
 const DIR = 'public/maps/';
 const files = existsSync(DIR) ? readdirSync(DIR).filter((f) => /\.bsp$/i.test(f)) : [];
-const dt = 1 / 64;
+let dt = 1 / 64; // per game mode below
 const idle: Cmd = { forward: 0, side: 0, jump: false, duck: false, yaw: 0, pitch: 0 };
 
 type Tally = { fell: number; hurt: number; stuck: number; teleports: number; maxSpeed: number };
 function play(map: MapDef, grid: ReturnType<typeof createGrid>, start: Player, ticks: number, bot: (p: Player, t: number) => Cmd): Tally {
   const tally: Tally = { fell: 0, hurt: 0, stuck: 0, teleports: 0, maxSpeed: 0 };
   let p = start;
-  let once: TickResult['oncePushes'] = new Set();
+  let state = newTickState();
   for (let t = 0; t < ticks; t++) {
-    const r = simTick(map, grid, p, bot(p, t), dt, once);
-    once = r.oncePushes;
+    const r = simTick(map, grid, p, bot(p, t), dt, state);
+    state = r.state;
     if (r.event === 'respawn') {
       tally[r.reason!]++;
       p = newPlayer(map.spawn);
@@ -38,10 +39,15 @@ function play(map: MapDef, grid: ReturnType<typeof createGrid>, start: Player, t
 const surfer = (spawnYaw: number) => (p: Player, t: number): Cmd => {
   const speed = Math.hypot(p.vel.x, p.vel.y);
   if (speed < 240) return { ...idle, forward: 1, yaw: spawnYaw };
-  return { ...idle, jump: true, side: Math.floor(t / 32) % 2 ? 1 : -1, yaw: (Math.atan2(p.vel.y, p.vel.x) * 180) / Math.PI };
+  return { ...idle, jump: true, side: Math.floor((t * dt) / 0.5) % 2 ? 1 : -1, yaw: (Math.atan2(p.vel.y, p.vel.x) * 180) / Math.PI };
 };
 
-describe.skipIf(!files.length)('maps folder playability', () => {
+describe.skipIf(!files.length).each(['csgo', 'cs16'] as GameMode[])('maps folder playability (%s)', (mode) => {
+  beforeAll(() => {
+    setGameMode(mode);
+    dt = mode === 'cs16' ? 1 / 100 : 1 / 64;
+  });
+  afterAll(() => setGameMode('csgo'));
   const report: string[] = [];
   it.each(files)('%s', (file) => {
     const buf = readFileSync(DIR + file);
@@ -53,9 +59,9 @@ describe.skipIf(!files.length)('maps folder playability', () => {
     const dests = [...new Map(map.teleports.map((t) => [`${t.dest.x},${t.dest.y},${t.dest.z}`, t.dest])).values()].map((d) => unstick(d, map.brushes));
     // A destination inside geometry is how the map itself is built (e.g. inside a player clip): reported, not failed.
     const badDests = dests.filter((d) => embedded(d, false, map.brushes));
-    const atSpawn = play(map, grid, newPlayer(map.spawn), 3 * 64, () => idle);
-    const atStages = dests.filter((d) => !embedded(d, false, map.brushes)).map((d) => play(map, grid, newPlayer(d), 2 * 64, () => idle));
-    const surfing = play(map, grid, newPlayer(map.spawn), 20 * 64, surfer(map.spawnYaw));
+    const atSpawn = play(map, grid, newPlayer(map.spawn), Math.round(3 / dt), () => idle);
+    const atStages = dests.filter((d) => !embedded(d, false, map.brushes)).map((d) => play(map, grid, newPlayer(d), Math.round(2 / dt), () => idle));
+    const surfing = play(map, grid, newPlayer(map.spawn), Math.round(20 / dt), surfer(map.spawnYaw));
     const stuck = atSpawn.stuck + surfing.stuck + atStages.reduce((s, a) => s + a.stuck, 0);
 
     report.push(

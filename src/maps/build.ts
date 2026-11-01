@@ -1,6 +1,6 @@
 import { Vec3, vec } from '../math';
 import { Brush, makeBox, makeRamp } from '../brush';
-import type { Teleport, Push, BspMap } from '../bsp';
+import type { Teleport, Push, BspMap, Hurt } from '../bsp';
 
 export type MapDef = {
   id: string;
@@ -13,7 +13,7 @@ export type MapDef = {
   endZone: Brush[] | null;
   teleports: Teleport[];
   pushes: Push[];
-  hurts: Brush[];
+  hurts: Hurt[];
   mesh?: BspMap['mesh']; // imported maps render this instead of brushes
   pak?: BspMap['pak'];
   props?: BspMap['props'];

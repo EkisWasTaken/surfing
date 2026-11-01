@@ -1,8 +1,8 @@
-import { config } from './config';
+import { config, setGameMode, GameMode } from './config';
 
-export type Settings = { sensitivity: number; fov: number; tickrate: 64 | 128; autobhop: boolean; showSpeed: boolean; map: string; jumpBind: string; knife: string; finish: string; wear: number; seed: number };
+export type Settings = { game: GameMode; sensitivity: number; fov: number; tickrate: 64 | 128; autobhop: boolean; showSpeed: boolean; map: string; jumpBind: string; knife: string; finish: string; wear: number; seed: number };
 
-export const defaults: Settings = { sensitivity: 2, fov: 90, tickrate: 64, autobhop: true, showSpeed: true, map: 'sandbox', jumpBind: 'Space', knife: 'knife_default_ct', finish: '', wear: 0.01, seed: 0 };
+export const defaults: Settings = { game: 'csgo', sensitivity: 2, fov: 90, tickrate: 64, autobhop: true, showSpeed: true, map: 'sandbox', jumpBind: 'Space', knife: 'knife_default_ct', finish: '', wear: 0.01, seed: 0 };
 
 const KEY = 'surf-settings';
 const num = (v: unknown, min: number, max: number, fallback: number) =>
@@ -17,6 +17,7 @@ export function parseSettings(raw: string | null): Settings {
     if (parsed && typeof parsed === 'object') o = parsed;
   } catch {}
   return {
+    game: o.game === 'cs16' ? 'cs16' : 'csgo',
     sensitivity: num(o.sensitivity, 0.01, 20, defaults.sensitivity),
     fov: num(o.fov, 60, 130, defaults.fov),
     tickrate: o.tickrate === 128 ? 128 : 64,
@@ -48,6 +49,7 @@ export function saveSettings(s: Settings) {
 
 export function applySettings(s: Settings) {
   config.sensitivity = s.sensitivity;
-  config.tickrate = s.tickrate;
+  setGameMode(s.game);
+  config.tickrate = s.game === 'cs16' ? 100 : s.tickrate; // CS 1.6 moves per frame, at the usual fps_max 100
   config.autobhop = s.autobhop;
 }

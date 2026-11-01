@@ -36,7 +36,10 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
           <label>FOV <output name="fovOut"></output>
             <input name="fov" type="range" min="60" max="130" step="1" />
           </label>
-          <label>Tickrate
+          <label>Game <span class="hint">(movement rules)</span>
+            <select name="game"><option value="csgo">CS:GO</option><option value="cs16">CS 1.6</option></select>
+          </label>
+          <label>Tickrate <span class="hint tickHint"></span>
             <select name="tickrate"><option value="64">64</option><option value="128">128</option></select>
           </label>
           <label class="knifePick" hidden>Knife
@@ -71,6 +74,12 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   el.fov.value = String(cur.fov);
   el.fovOut.value = String(cur.fov);
   el.tickrate.value = String(cur.tickrate);
+  el.game.value = cur.game;
+  const showGame = () => {
+    el.tickrate.disabled = cur.game === 'cs16';
+    $('.tickHint').textContent = cur.game === 'cs16' ? '(CS 1.6 runs at 100 fps)' : '';
+  };
+  showGame();
   el.autobhop.checked = cur.autobhop;
   el.showSpeed.checked = cur.showSpeed;
   el.wear.value = String(cur.wear);
@@ -82,6 +91,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
 
   const change = (patch: Partial<Settings>) => {
     cur = { ...cur, ...patch };
+    showGame();
     speed.hidden = !cur.showSpeed;
     opts.onChange(cur);
   };
@@ -97,6 +107,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       sensitivity: Number.isFinite(sens) ? Math.min(20, Math.max(0.01, sens)) : cur.sensitivity,
       fov: Number(el.fov.value),
       tickrate: el.tickrate.value === '128' ? 128 : 64,
+      game: el.game.value === 'cs16' ? 'cs16' : 'csgo',
       autobhop: el.autobhop.checked,
       showSpeed: el.showSpeed.checked,
       knife: el.knife.value || cur.knife,

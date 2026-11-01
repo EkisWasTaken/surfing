@@ -28,6 +28,17 @@ describe('trace', () => {
     expect(t.startSolid).toBe(true);
   });
 
+  it('lets a box touching a wall move away (startSolid, not allSolid), as Quake/Source do', () => {
+    const wall = makeBox(vec(16, -100, 0), vec(48, 100, 200)); // player's +x face exactly touches it
+    const t = trace(vec(0, 0, 10), vec(-20, 0, 10), mins, maxs, [wall]);
+    expect(t.startSolid).toBe(true);
+    expect(t.allSolid).toBe(false);
+    expect(t.fraction).toBe(1);
+    const stuck = trace(vec(30, 0, 10), vec(30, 0, 10), mins, maxs, [wall]);
+    expect(stuck.allSolid).toBe(true);
+    expect(stuck.fraction).toBe(0);
+  });
+
   it('hits a 45° left ramp with its slope normal', () => {
     const ramp = makeRamp(vec(0, 0, 0), 512, 256, 256, 'left');
     const slope = ramp.planes.find((p) => p.normal.y > 0 && p.normal.z > 0)!;

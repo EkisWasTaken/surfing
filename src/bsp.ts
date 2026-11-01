@@ -4,7 +4,11 @@ import { Vec3, vec, add, dot, scale, angleVectors } from './math';
 import type { Brush, Plane } from './brush';
 import { readZip } from './pak';
 
-export type Teleport = { brushes: Brush[]; dest: Vec3; yaw: number };
+// landmark: arrive at the same offset from dest as from the landmark, keeping angles and velocity.
+// keepAngles: landmark or the "preserve angles" flag; otherwise the view turns to the destination's yaw.
+export type Teleport = { brushes: Brush[]; dest: Vec3; yaw: number; landmark: Vec3 | null; keepAngles: boolean };
+// trigger_hurt: damage per second (Source/GoldSrc default 10), dealt in half-second doses.
+export type Hurt = { brushes: Brush[]; damage: number };
 // trigger_push: base velocity while inside; `once` pushes a single impulse on entry.
 export type Push = { brushes: Brush[]; vel: Vec3; once: boolean };
 // angles are Source (pitch, yaw, roll) in x, y, z.
@@ -24,7 +28,7 @@ export type BspMap = {
   spawnYaw: number;
   teleports: Teleport[];
   pushes: Push[];
-  hurts: Brush[]; // trigger_hurt volumes: touching one respawns you
+  hurts: Hurt[];
   startZone: Brush[] | null;
   endZone: Brush[] | null;
   killZ: number;
@@ -164,8 +168,9 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
   const teleports: Teleport[] = entities
     .filter((e) => e.classname === 'trigger_teleport' && enabled(e) && e.target && byName.has(e.target))
     .map((e) => {
-      const d = byName.get(e.target)!;
-      return { brushes: modelOf(e), dest: parseVec(d.origin), yaw: parseVec(d.angles).y };
+      const d = byName.get(e.target)!, lm = e.landmark ? byName.get(e.landmark) : undefined;
+      const landmark = lm ? parseVec(lm.origin) : null;
+      return { brushes: modelOf(e), dest: parseVec(d.origin), yaw: parseVec(d.angles).y, landmark, keepAngles: !!landmark || (Number(e.spawnflags) & 32) !== 0 };
     })
     .filter((t) => t.brushes.length);
 
@@ -196,7 +201,10 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
         return { brushes: modelOf(e), vel: scale(angleVectors(d.y, d.x).forward, Number(e.speed) || 0), once: (Number(e.spawnflags) & 128) !== 0 };
       })
       .filter((p) => p.brushes.length),
-    hurts: entities.filter((e) => e.classname === 'trigger_hurt' && enabled(e)).flatMap((e) => modelOf(e)),
+    hurts: entities
+      .filter((e) => e.classname === 'trigger_hurt' && enabled(e))
+      .map((e) => ({ brushes: modelOf(e), damage: e.damage === undefined ? 10 : Number(e.damage) || 0 }))
+      .filter((h) => h.brushes.length),
     startZone: zone(/start|begin/i, 'trigger_momentum_timer_start'),
     endZone: zone(/end|finish/i, 'trigger_momentum_timer_stop'),
     killZ: models[0].minZ - 1000,

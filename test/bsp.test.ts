@@ -212,7 +212,7 @@ describe('brush entities', () => {
     expect(side.brushes[0].mins.y).toBe(5000 - 16);
   });
   it('reads trigger_hurt as respawn volumes and Momentum timer triggers as zones', () => {
-    expect(m.hurts[0].mins.y).toBe(7000 - 16);
+    expect(m.hurts[0].brushes[0].mins.y).toBe(7000 - 16);
     expect(m.startZone![0].mins.y).toBe(9000 - 16);
   });
 });

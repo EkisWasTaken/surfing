@@ -1,20 +1,19 @@
-// Port of Source CGameMovement (FullWalkMove path) with CS:GO values from config.
+// Port of Source CGameMovement (FullWalkMove path), with the GoldSrc/CS 1.6 differences behind config switches.
 import { Vec3, vec, copy, add, sub, scale, dot, cross, length, normalize, angleVectors } from './math';
 import { Brush } from './brush';
 import { trace, DIST_EPSILON } from './trace';
 import { config } from './config';
 
 // baseVel: velocity from a trigger_push the player is inside (Source's base velocity).
-export type Player = { pos: Vec3; vel: Vec3; onGround: boolean; ducked: boolean; groundNormal: Vec3 | null; jumpHeld: boolean; baseVel: Vec3 };
+// stamina: CS 1.6 jump penalty in ms (pmove->fuser2), 0 when unused.
+export type Player = { pos: Vec3; vel: Vec3; onGround: boolean; ducked: boolean; groundNormal: Vec3 | null; jumpHeld: boolean; baseVel: Vec3; stamina: number };
 export type Cmd = { forward: number; side: number; jump: boolean; duck: boolean; walk?: boolean; yaw: number; pitch: number };
 
-const NON_JUMP_VELOCITY = 140;
 const MAX_CLIP_PLANES = 5;
-// CS:GO CS_PLAYER_SPEED_WALK_MODIFIER / CS_PLAYER_SPEED_DUCK_MODIFIER.
-const WALK_MODIFIER = 0.52;
-const DUCK_MODIFIER = 0.34;
+const STAMINA_JUMP = 1315.789429; // CS 1.6 PM_Jump: pmove->fuser2 after a jump (ms)
+const staminaRatio = (st: number) => (100 - st * 0.001 * 19) * 0.01;
 
-export const newPlayer = (pos: Vec3): Player => ({ pos: copy(pos), vel: vec(), onGround: false, ducked: false, groundNormal: null, jumpHeld: false, baseVel: vec() });
+export const newPlayer = (pos: Vec3): Player => ({ pos: copy(pos), vel: vec(), onGround: false, ducked: false, groundNormal: null, jumpHeld: false, baseVel: vec(), stamina: 0 });
 
 // Really inside geometry, not just touching it: the trace counts exact contact as inside (as Quake/Source do),
 // but Source still lets a touching player move away, so stuck checks shrink the hull by a hair.
@@ -48,12 +47,18 @@ export function clipVelocity(v: Vec3, n: Vec3, overbounce: number): Vec3 {
 
 type State = Player & { brushes: Brush[]; dt: number };
 
+// CS 1.6 PM_PreventMegaBunnyJumping: above 1.2x maxspeed, a jump crops speed to 65% of that cap.
+function preventMegaBunnyJumping(s: State) {
+  const cap = 1.2 * config.maxspeed, spd = length(s.vel);
+  if (spd > cap) s.vel = scale(s.vel, (cap / spd) * 0.65);
+}
+
 const hull = (s: State) => (s.ducked ? config.hullDuck : config.hullStand);
 const traceHull = (s: State, from: Vec3, to: Vec3) => trace(from, to, hull(s).mins, hull(s).maxs, s.brushes);
 
 function wish(cmd: Cmd, s: State): { dir: Vec3; speed: number } {
   const { forward, right } = angleVectors(cmd.yaw, 0);
-  const max = config.maxspeed * (cmd.walk ? WALK_MODIFIER : 1) * (s.ducked && s.onGround ? DUCK_MODIFIER : 1);
+  const max = config.maxspeed * (cmd.walk ? config.walkModifier : 1) * (s.ducked && s.onGround ? config.duckModifier : 1);
   const f = cmd.forward * max, sd = cmd.side * max;
   const v = vec(forward.x * f + right.x * sd, forward.y * f + right.y * sd, 0);
   return { dir: normalize(v), speed: Math.min(length(v), max) };
@@ -73,8 +78,16 @@ export function applyPush(p: Player, push: Vec3 | null, dt: number): Player {
 function friction(s: State) {
   const speed = length(s.vel);
   if (speed < 0.1) return;
+  let fric = config.friction;
+  if (config.edgeFriction !== 1) {
+    // GoldSrc PM_Friction: trace 34u down from 16u ahead, hull centred at the feet; nothing there = dropoff.
+    const h = hull(s).maxs.z;
+    const start = add(s.pos, vec((s.vel.x / speed) * 16, (s.vel.y / speed) * 16, -h / 2));
+    const tr = traceHull(s, start, sub(start, vec(0, 0, 34)));
+    if (!tr.startSolid && tr.fraction === 1) fric *= config.edgeFriction;
+  }
   const control = speed < config.stopspeed ? config.stopspeed : speed;
-  const newspeed = Math.max(speed - control * config.friction * s.dt, 0);
+  const newspeed = Math.max(speed - control * fric * s.dt, 0);
   s.vel = scale(s.vel, newspeed / speed);
 }
 
@@ -103,7 +116,8 @@ function tryPlayerMove(s: State) {
     if (length(s.vel) === 0) break;
     const tr = traceHull(s, s.pos, add(s.pos, scale(s.vel, timeLeft)));
     allFraction += tr.fraction;
-    if (tr.startSolid) {
+    // Source zeroes velocity only when the whole move is inside solid; merely starting in contact still slides away.
+    if (tr.allSolid) {
       s.vel = vec();
       return;
     }
@@ -161,7 +175,8 @@ function tryPlayerMove(s: State) {
 }
 
 function stayOnGround(s: State) {
-  const start = add(s.pos, vec(0, 0, 2));
+  // Source: first see how far up (2u) we can go without getting stuck, then trace down from there.
+  const start = traceHull(s, s.pos, add(s.pos, vec(0, 0, 2))).endPos;
   const tr = traceHull(s, start, sub(s.pos, vec(0, 0, config.stepSize)));
   if (tr.fraction > 0 && tr.fraction < 1 && !tr.startSolid && tr.normal!.z >= 0.7) s.pos = tr.endPos;
 }
@@ -189,13 +204,18 @@ function stepMove(s: State) {
 }
 
 function walkMove(s: State, cmd: Cmd) {
+  if (config.jumpStamina && s.stamina > 0) {
+    // CS 1.6 PM_WalkMove: speed held down for a moment after each jump
+    const r = staminaRatio(s.stamina);
+    s.vel = vec(s.vel.x * r, s.vel.y * r, s.vel.z);
+  }
   const w = wish(cmd, s);
   s.vel.z = 0;
   accelerate(s, w.dir, w.speed, config.accelerate);
   s.vel.z = 0;
   s.vel = add(s.vel, s.baseVel); // moves with the push, removed again below
   if (length(s.vel) < 1) {
-    s.vel = vec();
+    s.vel = sub(vec(), s.baseVel); // Source zeroes, then still removes the base velocity
     return;
   }
   const dest = add(s.pos, scale(s.vel, s.dt));
@@ -215,7 +235,7 @@ function airMove(s: State, cmd: Cmd) {
 }
 
 function categorizePosition(s: State) {
-  if (s.vel.z > NON_JUMP_VELOCITY) {
+  if (s.vel.z > config.nonJumpVelocity) {
     s.onGround = false;
     s.groundNormal = null;
     return;
@@ -251,6 +271,7 @@ function checkVelocity(s: State) {
 
 export function step(p: Player, cmd: Cmd, brushes: Brush[], dt: number): Player {
   const s: State = { ...p, pos: copy(p.pos), vel: copy(p.vel), brushes, dt };
+  if (s.stamina > 0) s.stamina = Math.max(0, s.stamina - dt * 1000); // PM_ReduceTimers, per msec
 
   duck(s, cmd.duck);
   s.vel.z -= config.gravity * 0.5 * dt;
@@ -260,8 +281,14 @@ export function step(p: Player, cmd: Cmd, brushes: Brush[], dt: number): Player 
   // Without autobhop, jump needs a fresh press (Source m_nOldButtons & IN_JUMP check).
   if (cmd.jump && s.onGround && (config.autobhop || !p.jumpHeld)) {
     s.onGround = false;
+    if (config.bunnyCap) preventMegaBunnyJumping(s);
     // CS:GO CheckJumpButton overwrites z then calls FinishGravity itself.
-    s.vel.z = config.jumpVelocity - config.gravity * 0.5 * dt;
+    let jump = config.jumpVelocity;
+    if (config.jumpStamina) {
+      if (s.stamina > 0) jump *= staminaRatio(s.stamina); // CS 1.6: back-to-back jumps are lower
+      s.stamina = STAMINA_JUMP;
+    }
+    s.vel.z = jump - config.gravity * 0.5 * dt;
   }
   if (s.onGround) {
     s.vel.z = 0;
@@ -276,5 +303,5 @@ export function step(p: Player, cmd: Cmd, brushes: Brush[], dt: number): Player 
   checkVelocity(s);
   if (s.onGround) s.vel.z = 0;
 
-  return { pos: s.pos, vel: s.vel, onGround: s.onGround, ducked: s.ducked, groundNormal: s.groundNormal, jumpHeld: cmd.jump, baseVel: p.baseVel };
+  return { pos: s.pos, vel: s.vel, onGround: s.onGround, ducked: s.ducked, groundNormal: s.groundNormal, jumpHeld: cmd.jump, baseVel: p.baseVel, stamina: s.stamina };
 }

@@ -9,8 +9,7 @@ import { readZip } from './pak';
 import { meshFromJson, unb64, vtexFromJson, VtexJson } from './cs2model';
 import { createGrid } from './grid';
 import { newPlayer, unstick, Player } from './movement';
-import { simTick, touching } from './sim';
-import type { Push } from './bsp';
+import { simTick, touching, newTickState } from './sim';
 import { createAccumulator, tickYaw } from './loop';
 import { newPose, stepPose } from './viewmodelPose';
 import { createInput } from './input';
@@ -36,13 +35,14 @@ let grid = createGrid(map.brushes);
 let prev: Player, cur: Player;
 let run: Run = newRun();
 let best = loadBest(map.id);
-let inOncePush = new Set<Push>(); // once-pushes touched last tick, so the impulse fires on entry only
+let simState = newTickState(); // once-pushes, health and hurt timing carried between ticks
 let pose = newPose(); // knife bob/sway
 let lastFrameView = { yaw: 0, pitch: 0 };
 let lastTickYaw = 0; // yaw the previous tick used, for spreading mouse turn across ticks
 
 function respawn() {
   prev = cur = newPlayer(map.spawn);
+  simState = newTickState();
   input.setView(map.spawnYaw, 0);
   lastTickYaw = map.spawnYaw;
   run = newRun();
@@ -64,7 +64,8 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
   settings,
   onPlay: input.requestLock,
   onChange(next: Settings) {
-    const mapChanged = next.map !== settings.map, tickChanged = next.tickrate !== settings.tickrate;
+    const mapChanged = next.map !== settings.map, tickChanged = next.tickrate !== settings.tickrate || next.game !== settings.game;
+    const gameChanged = next.game !== settings.game;
     const knifeChanged = next.knife !== settings.knife;
     const finishChanged = next.finish !== settings.finish || next.wear !== settings.wear || next.seed !== settings.seed;
     settings = next;
@@ -73,6 +74,7 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
     input.setJumpBind(next.jumpBind);
     renderer.setFov(next.fov);
     if (tickChanged) acc = createAccumulator(1 / config.tickrate);
+    if (gameChanged && !mapChanged) respawn(); // hulls and rules differ: start the run over under the new ones
     if (knifeChanged) loadKnife(next.knife);
     else if (finishChanged) applyFinish();
     if (!mapChanged) return;
@@ -221,14 +223,16 @@ const eye = (p: Player) => add(p.pos, vec(0, 0, p.ducked ? config.eyeDuck : conf
 
 function tick(cmd: ReturnType<typeof input.cmd>, tickDt: number) {
   prev = cur;
-  const r = simTick(map, grid, cur, cmd, tickDt, inOncePush);
+  const r = simTick(map, grid, cur, cmd, tickDt, simState);
   if (r.event === 'respawn') return respawn();
   cur = r.player;
-  inOncePush = r.oncePushes;
+  simState = r.state;
   if (r.teleport) {
     prev = cur;
-    input.setView(r.teleport.yaw, input.view().pitch);
-    lastTickYaw = r.teleport.yaw;
+    if (!r.teleport.keepAngles) {
+      input.setView(r.teleport.yaw, input.view().pitch);
+      lastTickYaw = r.teleport.yaw;
+    }
   }
   const was = run.phase;
   run = tickRun(run, touching(cur, map.startZone), touching(cur, map.endZone), tickDt);
