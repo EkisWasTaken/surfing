@@ -42,6 +42,17 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
           <label class="knifePick" hidden>Knife
             <select name="knife"></select>
           </label>
+          <div class="finishOpts" hidden>
+            <label>Finish
+              <select name="finish"></select>
+            </label>
+            <label>Wear <output name="wearOut"></output>
+              <input name="wear" type="range" min="0" max="1" step="0.001" />
+            </label>
+            <label>Pattern seed <span class="hint">(0–1000)</span>
+              <input name="seed" type="number" min="0" max="1000" step="1" />
+            </label>
+          </div>
           <div class="bind">Jump <button type="button" class="bindBtn"></button></div>
           <label class="check"><input name="autobhop" type="checkbox" /> Auto-bhop (hold jump)</label>
           <label class="check"><input name="showSpeed" type="checkbox" /> Show speed</label>
@@ -62,6 +73,10 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   el.tickrate.value = String(cur.tickrate);
   el.autobhop.checked = cur.autobhop;
   el.showSpeed.checked = cur.showSpeed;
+  el.wear.value = String(cur.wear);
+  el.seed.value = String(cur.seed);
+  const wearLabel = (w: number) => `${w.toFixed(3)} · ${w < 0.07 ? 'Factory New' : w < 0.15 ? 'Minimal Wear' : w < 0.38 ? 'Field-Tested' : w < 0.45 ? 'Well-Worn' : 'Battle-Scarred'}`;
+  el.wearOut.value = wearLabel(cur.wear);
   bindBtn.textContent = bindLabel(cur.jumpBind);
   speed.hidden = !cur.showSpeed;
 
@@ -75,7 +90,8 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   form.addEventListener('input', (e) => {
     if (e.target === el.file) return;
     el.fovOut.value = el.fov.value;
-    const sens = parseFloat(el.sensitivity.value);
+    el.wearOut.value = wearLabel(Number(el.wear.value));
+    const sens = parseFloat(el.sensitivity.value), seed = parseInt(el.seed.value, 10);
     change({
       map: el.map.value,
       sensitivity: Number.isFinite(sens) ? Math.min(20, Math.max(0.01, sens)) : cur.sensitivity,
@@ -84,6 +100,10 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       autobhop: el.autobhop.checked,
       showSpeed: el.showSpeed.checked,
       knife: el.knife.value || cur.knife,
+      // An unchanged finish list keeps the saved finish even if this knife doesn't offer it.
+      finish: e.target === el.finish ? el.finish.value : cur.finish,
+      wear: Number(el.wear.value),
+      seed: Number.isFinite(seed) ? Math.min(1000, Math.max(0, seed)) : cur.seed,
     });
   });
   el.file.addEventListener('change', () => {
@@ -138,6 +158,12 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       el.knife.replaceChildren(...list.map((k) => new Option(k.name, k.id)));
       el.knife.value = list.some((k) => k.id === cur.knife) ? cur.knife : (list[0]?.id ?? '');
       $('.knifePick').hidden = list.length === 0;
+    },
+    // The current knife's finishes; the controls hide for knives without any (default knives).
+    setFinishes(list: { id: string; name: string }[]) {
+      el.finish.replaceChildren(new Option('Vanilla', ''), ...list.map((f) => new Option(f.name, f.id)));
+      el.finish.value = list.some((f) => f.id === cur.finish) ? cur.finish : '';
+      $('.finishOpts').hidden = list.length === 0;
     },
     addMap(m: { id: string; name: string }, select = true) {
       if (![...el.map.options].some((o) => o.value === m.id)) el.map.add(new Option(m.name, m.id));

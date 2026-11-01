@@ -57,7 +57,8 @@ function vertices(desc: Any, data: Uint8Array) {
     const read =
       uv.m_Format === R32G32_FLOAT ? (k: number) => dv.getFloat32(u + k * 4, true)
       : uv.m_Format === R16G16_FLOAT ? (k: number) => half(dv.getUint16(u + k * 2, true))
-      : uv.m_Format === R16G16_SNORM ? (k: number) => Math.max(-1, dv.getInt16(u + k * 2, true) / 32767)
+            // CS2 packs a flag in the sign bit of SNORM UVs (neighbours read +0.713 / -0.718): the coordinate is the magnitude.
+      : uv.m_Format === R16G16_SNORM ? (k: number) => Math.min(1, Math.abs(dv.getInt16(u + k * 2, true)) / 32767)
       : () => 0;
     uvs[i * 2] = read(0);
     uvs[i * 2 + 1] = read(1);
@@ -135,6 +136,10 @@ export const b64 = (b: Uint8Array) => {
 export const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const bytesOf = (a: Float32Array | Uint32Array | Uint16Array) => new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
 
+export type VtexJson = { width: number; height: number; format: Vtex['format']; mips: { width: number; height: number; data: string }[] };
+export const vtexToJson = (t: Vtex): VtexJson => ({ width: t.width, height: t.height, format: t.format, mips: t.mips.map((x) => ({ width: x.width, height: x.height, data: b64(x.data) })) });
+export const vtexFromJson = (t: VtexJson): Vtex => ({ ...t, mips: t.mips.map((x) => ({ ...x, data: unb64(x.data) })) });
+
 export type Cs2MeshJson = ReturnType<typeof meshToJson>;
 
 export function meshToJson(m: Cs2Mesh) {
@@ -147,7 +152,7 @@ export function meshToJson(m: Cs2Mesh) {
       start: g.start,
       count: g.count,
       material: g.material,
-      texture: g.texture && { width: g.texture.width, height: g.texture.height, format: g.texture.format, mips: g.texture.mips.map((x) => ({ width: x.width, height: x.height, data: b64(x.data) })) },
+      texture: g.texture && vtexToJson(g.texture),
     })),
   };
 }
@@ -158,6 +163,6 @@ export function meshFromJson(j: Cs2MeshJson): Cs2Mesh {
     uvs: new Float32Array(unb64(j.uvs).buffer),
     indices: new Uint32Array(unb64(j.indices).buffer),
     skin: j.skin && { joints: new Uint16Array(unb64(j.skin.joints).buffer), weights: new Float32Array(unb64(j.skin.weights).buffer), bones: j.skin.bones },
-    groups: j.groups.map((g) => ({ ...g, texture: g.texture && { ...g.texture, mips: g.texture.mips.map((x) => ({ ...x, data: unb64(x.data) })) } })),
+    groups: j.groups.map((g) => ({ ...g, texture: g.texture && vtexFromJson(g.texture) })),
   };
 }

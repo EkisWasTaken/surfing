@@ -297,7 +297,7 @@ export function createRenderer(canvas: HTMLCanvasElement) {
   scene.add(world);
   let hfov = 90;
 
-  const viewmodel = createViewmodel();
+  const viewmodel = createViewmodel(renderer);
   renderer.autoClear = false; // world, then the knife on top with only depth cleared
   const resize = () => {
     renderer.setSize(window.innerWidth, window.innerHeight, false);
@@ -357,6 +357,7 @@ export function createRenderer(canvas: HTMLCanvasElement) {
     },
     setKnife: (mesh: Parameters<typeof viewmodel.setKnife>[0]) => viewmodel.setKnife(mesh, renderer.extensions.has('EXT_texture_compression_bptc')),
     inspect: () => viewmodel.inspect(),
+    setFinish: (choice: Parameters<typeof viewmodel.setFinish>[0]) => viewmodel.setFinish(choice, renderer.extensions.has('EXT_texture_compression_bptc')),
     setArms: (b: Parameters<typeof viewmodel.setArms>[0]) => viewmodel.setArms(b, renderer.extensions.has('EXT_texture_compression_bptc')),
     setFov(fov: number) {
       hfov = fov;

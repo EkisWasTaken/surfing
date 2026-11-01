@@ -1,10 +1,13 @@
 // First-person viewmodel layer: its own scene and camera, drawn over the world so it never clips into walls.
 // Holds CS2's own arms, knife and first-person animations (decoded by the import step from the local CS2 install).
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import type { Pose } from './viewmodelPose';
 import type { Cs2Mesh } from './cs2model';
 import type { Vtex } from './cs2';
 import type { NmSkeleton } from './cs2anim';
+import type { Finish } from './cs2finish';
+import { finishMaterial, PaintInputs, FinishShared } from './finishMaterial';
 
 const DEG = Math.PI / 180;
 const VIEWMODEL_FOV = 68; // CS:GO viewmodel_fov default (horizontal at 4:3)
@@ -14,7 +17,8 @@ type Track = { frames: number; duration: number; poses: Float32Array };
 // Arms poses (viewmodel skeleton) plus the knife's own bones (its skeleton), sampled on the same clock.
 export type ViewmodelClip = Track & { knife: Track | null };
 export type ArmsBundle = { skeleton: NmSkeleton; arms: Cs2Mesh };
-export type KnifeBundle = { mesh: Cs2Mesh; skeleton: NmSkeleton | null; clips: Record<'draw' | 'idle' | 'lookat01', ViewmodelClip> };
+export type KnifeBundle = { mesh: Cs2Mesh; skeleton: NmSkeleton | null; clips: Record<'draw' | 'idle' | 'lookat01', ViewmodelClip>; paint: PaintInputs | null };
+export type FinishChoice = { finish: Finish & { pattern: Vtex | null }; shared: FinishShared; wear: number; seed: number };
 
 function material(t: Vtex | null, bptc: boolean, metal: number) {
   // BC7 needs EXT_texture_compression_bptc; DXT needs S3TC. Without them the part is drawn untextured.
@@ -24,6 +28,7 @@ function material(t: Vtex | null, bptc: boolean, metal: number) {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.anisotropy = 8;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping; // Source 2 samplers wrap; CS2 UVs (SNORM) go negative
   tex.needsUpdate = true;
   return new THREE.MeshStandardMaterial({ map: tex, metalness: metal, roughness: 0.55 });
 }
@@ -94,11 +99,14 @@ function skinnedRig(skeleton: NmSkeleton, model: Cs2Mesh, bptc: boolean, metal: 
       setPose(lerp, i);
     }
   };
-  return { root, sample, bone: (n: string) => bones[names.indexOf(n)] };
+  return { root, mesh, sample, bone: (n: string) => bones[names.indexOf(n)] };
 }
 
-export function createViewmodel() {
+export function createViewmodel(renderer: THREE.WebGLRenderer) {
   const scene = new THREE.Scene();
+  // Something for metal to reflect: knife steel and anodized finishes are mostly reflection.
+  scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+  scene.environmentIntensity = 0.6;
   scene.add(new THREE.HemisphereLight(0xfff1dc, 0x2a2420, 1.1));
   const sun = new THREE.DirectionalLight(0xffffff, 1.8);
   sun.position.set(-1, 1.5, 1);
@@ -114,7 +122,7 @@ export function createViewmodel() {
   scene.add(rig);
 
   let arms: ReturnType<typeof skinnedRig> | null = null;
-  let knife: { root: THREE.Object3D; rig: ReturnType<typeof skinnedRig> | null; clips: KnifeBundle['clips'] } | null = null;
+  let knife: { root: THREE.Object3D; mesh: THREE.Mesh; base: THREE.MeshStandardMaterial[]; rig: ReturnType<typeof skinnedRig> | null; clips: KnifeBundle['clips']; paint: PaintInputs | null } | null = null;
   let anim = { clip: 'draw' as keyof KnifeBundle['clips'], start: -1 }; // start < 0: begins on the first drawn frame (after upload/compile stalls)
   const mount = () => knife && (arms?.bone('wpn') ?? hold).add(knife.root); // weapons ride the viewmodel skeleton's wpn bone
 
@@ -125,8 +133,8 @@ export function createViewmodel() {
     setKnife(b: KnifeBundle, bptc: boolean) {
       knife?.root.removeFromParent();
       const r = b.skeleton && b.mesh.skin ? skinnedRig(b.skeleton, b.mesh, bptc, 0.35) : null;
-      const root = r?.root ?? new THREE.Mesh(geometry(b.mesh), b.mesh.groups.map((g) => material(g.texture, bptc, 0.35)));
-      knife = { root, rig: r, clips: b.clips };
+      const mesh = r?.mesh ?? new THREE.Mesh(geometry(b.mesh), b.mesh.groups.map((g) => material(g.texture, bptc, 0.35)));
+      knife = { root: r?.root ?? mesh, mesh, base: mesh.material as THREE.MeshStandardMaterial[], rig: r, clips: b.clips, paint: b.paint };
       mount();
       anim = { clip: 'draw', start: -1 };
     },
@@ -135,6 +143,17 @@ export function createViewmodel() {
       view.add(arms.root);
       mount();
       anim = { clip: 'draw', start: -1 };
+    },
+    // A finish painted over the knife (null = vanilla). False when this knife or browser can't show it.
+    setFinish(choice: FinishChoice | null, bptc: boolean) {
+      if (!knife) return false;
+      for (const m of knife.mesh.material as THREE.Material[]) if (!knife.base.includes(m as THREE.MeshStandardMaterial)) m.dispose();
+      knife.mesh.material = knife.base;
+      if (!choice || !knife.paint) return !choice;
+      const painted = knife.base.map((m) => finishMaterial(m, knife!.paint!, choice.finish, choice.shared, bptc, choice.wear, choice.seed));
+      if (painted.some((m) => !m)) return false;
+      knife.mesh.material = painted as THREE.MeshStandardMaterial[];
+      return true;
     },
     inspect() {
       if (anim.clip === 'idle') anim = { clip: 'lookat01', start: performance.now() };

@@ -6,7 +6,7 @@ import type { MapDef } from './maps';
 import { bspToMap, goalBox, saveGoal } from './maps/imported';
 import { parseBsp } from './bsp';
 import { readZip } from './pak';
-import { meshFromJson, unb64 } from './cs2model';
+import { meshFromJson, unb64, vtexFromJson, VtexJson } from './cs2model';
 import { createGrid } from './grid';
 import { newPlayer, unstick, Player } from './movement';
 import { simTick, touching } from './sim';
@@ -65,13 +65,16 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
   onPlay: input.requestLock,
   onChange(next: Settings) {
     const mapChanged = next.map !== settings.map, tickChanged = next.tickrate !== settings.tickrate;
-    if (next.knife !== settings.knife) loadKnife(next.knife);
+    const knifeChanged = next.knife !== settings.knife;
+    const finishChanged = next.finish !== settings.finish || next.wear !== settings.wear || next.seed !== settings.seed;
     settings = next;
     applySettings(next);
     saveSettings(next);
     input.setJumpBind(next.jumpBind);
     renderer.setFov(next.fov);
     if (tickChanged) acc = createAccumulator(1 / config.tickrate);
+    if (knifeChanged) loadKnife(next.knife);
+    else if (finishChanged) applyFinish();
     if (!mapChanged) return;
     const known = maps.find((m) => m.id === next.map);
     if (known) useMap(known);
@@ -123,6 +126,10 @@ async function loadFolderMap(file: string) {
 
 // CS2's arms and knives, decoded by `npm run import-maps` from the local CS2 install (absent → no viewmodel).
 const json = (url: string) => fetch(url).then((r) => (r.ok && r.headers.get('content-type')?.includes('json') ? r.json() : null));
+/* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+type Any = any;
+let knives: { id: string; name: string; finishes: string[] }[] = [];
+const finishNames: Record<string, string> = {};
 type TrackJson = { frames: number; duration: number; poses: string };
 const track = (c: TrackJson) => ({ ...c, poses: new Float32Array(unb64(c.poses).buffer) });
 function loadKnife(id: string) {
@@ -130,16 +137,43 @@ function loadKnife(id: string) {
     .then((j) => {
       if (!j || settings.knife !== id) return; // a newer pick won the race
       const clips = Object.fromEntries(Object.entries(j.clips as Record<string, TrackJson & { knife: TrackJson | null }>).map(([k, c]) => [k, { ...track(c), knife: c.knife && track(c.knife) }]));
-      renderer.setKnife({ mesh: meshFromJson(j.mesh), skeleton: j.skeleton, clips: clips as Parameters<typeof renderer.setKnife>[0]['clips'] });
+      const p = j.paint;
+      const paint = p && { ...p, masks: vtexFromJson(p.masks), ao: vtexFromJson(p.ao), pos: vtexFromJson(p.pos) };
+      renderer.setKnife({ mesh: meshFromJson(j.mesh), skeleton: j.skeleton, clips: clips as Parameters<typeof renderer.setKnife>[0]['clips'], paint });
+      hud.setFinishes((knives.find((k) => k.id === id)?.finishes ?? []).map((f) => ({ id: f, name: finishNames[f] ?? f })));
+      applyFinish();
     })
     .catch((e) => console.warn('knife:', e));
+}
+// Finishes load on demand: each is a few MB (its pattern), the shared wear/grunge set once.
+const finishCache = new Map<string, Promise<unknown>>();
+const cached = (url: string, decode: (j: Any) => unknown) => {
+  if (!finishCache.has(url)) finishCache.set(url, json(url).then((j) => j && decode(j)));
+  return finishCache.get(url)!;
+};
+function applyFinish() {
+  const want = settings.finish, offered = knives.find((k) => k.id === settings.knife)?.finishes ?? [];
+  if (!want || !offered.includes(want)) return void renderer.setFinish(null);
+  Promise.all([
+    cached(`/cs2/finishes/${want}.json`, (j) => ({ ...j, pattern: j.pattern && vtexFromJson(j.pattern) })),
+    cached('/cs2/finishes/shared.json', (j) => ({ wear: j.wear && vtexFromJson(j.wear as VtexJson), grunge: j.grunge && vtexFromJson(j.grunge as VtexJson) })),
+  ])
+    .then(([finish, shared]) => {
+      if (settings.finish !== want || !finish || !shared) return; // a newer pick won the race, or the file is gone
+      if (!renderer.setFinish({ finish, shared, wear: settings.wear, seed: settings.seed } as Parameters<typeof renderer.setFinish>[0])) hud.flash('This finish needs BC7 texture support (not available in this browser)');
+    })
+    .catch((e) => console.warn('finish:', e));
 }
 json('/cs2/viewmodel.json')
   .then((j) => j && renderer.setArms({ skeleton: j.skeleton, arms: meshFromJson(j.arms) }))
   .catch((e) => console.warn('viewmodel arms:', e));
-json('/cs2/knives/index.json')
-  .then((list: { id: string; name: string }[] | null) => {
+json('/cs2/finishes/index.json')
+  .then((names) => names && Object.assign(finishNames, names))
+  .catch(() => {})
+  .then(() => json('/cs2/knives/index.json'))
+  .then((list: typeof knives | null) => {
     if (!list?.length) return;
+    knives = list;
     hud.setKnives(list);
     if (!list.some((k) => k.id === settings.knife)) settings = { ...settings, knife: list[0].id };
     loadKnife(settings.knife);

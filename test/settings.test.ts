@@ -26,4 +26,9 @@ describe('jumpBind', () => {
     expect(parseSettings('{"knife":"../knife_x"}').knife).toBe(defaults.knife);
     expect(parseSettings('{"knife":"bayonet"}').knife).toBe(defaults.knife);
   });
+  it('validates finish, wear and seed', () => {
+    expect(parseSettings('{"finish":"aa_fade","wear":0.5,"seed":661}')).toMatchObject({ finish: 'aa_fade', wear: 0.5, seed: 661 });
+    expect(parseSettings('{"finish":"../x","wear":7,"seed":-3.6}')).toMatchObject({ finish: defaults.finish, wear: 1, seed: 0 });
+    expect(parseSettings('{"seed":12.4}').seed).toBe(12);
+  });
 });

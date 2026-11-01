@@ -3,15 +3,42 @@
 import type { VpkEntry } from './vpk';
 import { lz4Into } from './kv3';
 
-// Source 2 VTexFormat → block format. DXT1/DXT5 match VTF's; BC7 is GPU-only (EXT_texture_compression_bptc).
-const FORMATS: Record<number, { name: 'dxt1' | 'dxt5' | 'bc7'; vtf: number; block: number }> = {
+// Source 2 VTexFormat → storage. DXT1/DXT5 match VTF's; BC7 is GPU-only (EXT_texture_compression_bptc).
+// BC4 (single channel) is decoded to R8 here; BGRA8888 and RGBA16161616F are plain pixels (`px` = bytes per pixel).
+type Stored = 'dxt1' | 'dxt5' | 'bc7' | 'bc4' | 'bgra8' | 'rgba16f';
+const FORMATS: Record<number, { name: Stored; vtf: number; block: number; px?: number }> = {
   1: { name: 'dxt1', vtf: 13, block: 8 },
   2: { name: 'dxt5', vtf: 15, block: 16 },
+  10: { name: 'rgba16f', vtf: 0, block: 0, px: 8 },
   20: { name: 'bc7', vtf: 0, block: 16 },
+  27: { name: 'bc4', vtf: 0, block: 8 },
+  28: { name: 'bgra8', vtf: 0, block: 0, px: 4 },
 };
 const COMPRESSED_MIP_SIZE = 4; // extra-data type: per-mip LZ4 sizes
 
-export type Vtex = { width: number; height: number; format: 'dxt1' | 'dxt5' | 'bc7'; mips: { width: number; height: number; data: Uint8Array }[] };
+export type VtexFormat = 'dxt1' | 'dxt5' | 'bc7' | 'r8' | 'rgba8' | 'rgba16f';
+export type Vtex = { width: number; height: number; format: VtexFormat; mips: { width: number; height: number; data: Uint8Array }[] };
+
+// BC4: two endpoints, then 3-bit indices into an 8-step (or 6-step + 0/255) ramp per 4x4 block.
+function decodeBc4(src: Uint8Array, w: number, h: number) {
+  const out = new Uint8Array(w * h), ramp = new Uint8Array(8);
+  let o = 0;
+  for (let by = 0; by < h; by += 4)
+    for (let bx = 0; bx < w; bx += 4, o += 8) {
+      const a = src[o], b = src[o + 1];
+      ramp[0] = a, ramp[1] = b;
+      for (let k = 1; k < 7; k++) ramp[k + 1] = a > b ? ((7 - k) * a + k * b) / 7 : k < 5 ? ((5 - k) * a + k * b) / 5 : k === 5 ? 0 : 255;
+      let bits = 0, nbits = 0, p = o + 2;
+      for (let i = 0; i < 16; i++) {
+        if (nbits < 3) (bits |= src[p++] << nbits), (nbits += 8);
+        const x = bx + (i & 3), y = by + (i >> 2);
+        if (x < w && y < h) out[y * w + x] = ramp[bits & 7];
+        (bits >>= 3), (nbits -= 3);
+      }
+    }
+  return out;
+}
+const blocks = (w: number, h: number) => Math.max(1, Math.ceil(w / 4)) * Math.max(1, Math.ceil(h / 4));
 
 // Mips largest first. Null for formats/layouts we don't handle.
 export function readVtex(bytes: Uint8Array): Vtex | null {
@@ -30,7 +57,7 @@ export function readVtex(bytes: Uint8Array): Vtex | null {
     const fmt = FORMATS[dv.getUint8(data + 26)], mips = Math.max(1, dv.getUint8(data + 27));
     if (!fmt || depth !== 1 || !width || !height) return null;
     const dims = (m: number) => [Math.max(1, width >> m), Math.max(1, height >> m)];
-    const mipSize = (m: number) => Math.max(1, Math.ceil(dims(m)[0] / 4)) * Math.max(1, Math.ceil(dims(m)[1] / 4)) * fmt.block;
+    const mipSize = (m: number) => (fmt.px ? dims(m)[0] * dims(m)[1] * fmt.px : blocks(dims(m)[0], dims(m)[1]) * fmt.block);
     // Record = [isCompressed, sizes offset, count]: when set, sizes[level] (level 0 = largest) gives each mip's stored size.
     let lz4Sizes: number[] | null = null;
     const extrasAt = data + 32 + dv.getUint32(data + 32, true), extras = dv.getUint32(data + 36, true);
@@ -50,10 +77,18 @@ export function readVtex(bytes: Uint8Array): Vtex | null {
       if (s + stored > bytes.length) return null;
       // A mip that didn't shrink is stored raw; only smaller ones are LZ4 blocks.
       const px = stored === raw ? bytes.subarray(s, s + raw) : lz4Block(bytes.subarray(s, s + stored), raw);
-      out.unshift({ width: dims(m)[0], height: dims(m)[1], data: px });
+      const [w, h] = dims(m);
+      let pixels = px;
+      if (fmt.name === 'bc4') pixels = decodeBc4(px, w, h);
+      else if (fmt.name === 'bgra8') {
+        pixels = new Uint8Array(px);
+        for (let k = 0; k < pixels.length; k += 4) (pixels[k] = px[k + 2]), (pixels[k + 2] = px[k]);
+      }
+      out.unshift({ width: w, height: h, data: pixels });
       s += stored;
     }
-    return { width, height, format: fmt.name, mips: out };
+    const format: VtexFormat = fmt.name === 'bc4' ? 'r8' : fmt.name === 'bgra8' ? 'rgba8' : fmt.name;
+    return { width, height, format, mips: out };
   } catch {
     return null;
   }
@@ -61,7 +96,7 @@ export function readVtex(bytes: Uint8Array): Vtex | null {
 
 export function vtexToVtf(bytes: Uint8Array): Uint8Array | null {
   const t = readVtex(bytes);
-  if (!t || t.format === 'bc7') return null; // classic VTF has no BC7
+  if (!t || (t.format !== 'dxt1' && t.format !== 'dxt5')) return null; // classic VTF: DXT only here
   const size = t.mips.reduce((a, m) => a + m.data.length, 0);
   // VTF 7.2 header (80 bytes), no low-res thumbnail; pixel data smallest mip first.
   const out = new Uint8Array(80 + size);

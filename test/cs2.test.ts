@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { vtexToVtf, createCs2Lookup } from '../src/cs2';
+import { vtexToVtf, createCs2Lookup, readVtex } from '../src/cs2';
 import { parseVtf } from '../src/vtf';
 import { resolveMaterial } from '../src/materials';
 import type { VpkEntry } from '../src/vpk';
@@ -7,8 +7,9 @@ import type { VpkEntry } from '../src/vpk';
 // Minimal Source 2 texture resource: header, a RED2 block, a DATA block with the texture header, then pixels (smallest mip first).
 // mipInfo: optional COMPRESSED_MIP_SIZE extra record [isCompressed, offset, count], as real CS2 textures carry.
 function vtex(width: number, height: number, format: number, mips: number, mipInfo?: number[]) {
-  const blockSize = format === 1 ? 8 : 16;
-  const sizes = Array.from({ length: mips }, (_, i) => Math.max(1, Math.ceil((width >> i) / 4)) * Math.max(1, Math.ceil((height >> i) / 4)) * blockSize);
+  const blockSize = format === 1 || format === 27 ? 8 : 16;
+  const sizes = Array.from({ length: mips }, (_, i) =>
+    format === 28 ? (width >> i) * (height >> i) * 4 : Math.max(1, Math.ceil((width >> i) / 4)) * Math.max(1, Math.ceil((height >> i) / 4)) * blockSize);
   const pixels = sizes.slice().reverse().map((s, k) => new Uint8Array(s).fill(k + 1)); // smallest first; fill = order
   const headerLen = 16 + 2 * 12, red2 = 8, data = mipInfo ? 40 + 12 + 12 : 40;
   const total = headerLen + red2 + data + sizes.reduce((a, b) => a + b, 0);
@@ -46,6 +47,23 @@ function vtex(width: number, height: number, format: number, mips: number, mipIn
   for (const px of pixels) out.set(px, p), (p += px.length);
   return out;
 }
+
+describe('readVtex', () => {
+  it('decodes BC4 blocks to one byte per pixel', () => {
+    const v = vtex(4, 4, 27, 1);
+    v.set([255, 0, 1, 0, 0, 0, 0, 0], v.length - 8); // endpoints 255/0; pixel 0 uses index 1 (= 0), the rest index 0 (= 255)
+    const t = readVtex(v)!;
+    expect(t.format).toBe('r8');
+    expect(Array.from(t.mips[0].data.subarray(0, 3))).toEqual([0, 255, 255]);
+  });
+  it('swizzles BGRA8888 to RGBA', () => {
+    const v = vtex(4, 4, 28, 1);
+    v.set([10, 20, 30, 40], v.length - 64);
+    const t = readVtex(v)!;
+    expect(t.format).toBe('rgba8');
+    expect(Array.from(t.mips[0].data.subarray(0, 4))).toEqual([30, 20, 10, 40]);
+  });
+});
 
 describe('vtexToVtf', () => {
   it('turns a DXT1 CS2 texture into a classic VTF with the same mips', () => {
