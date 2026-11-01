@@ -36,11 +36,22 @@ describe('console', () => {
   it('says what it does not know, lists, finds and completes', () => {
     const t = setup();
     t.run('noclipp');
-    expect(t.out.at(-1)).toBe('Unknown command "noclipp"');
+    expect(t.out.at(-1)).toBe('Unknown command "noclipp" (help lists them all)');
     t.run('find accel');
     expect(t.out.some((l) => l.includes('sv_airaccelerate'))).toBe(true);
     expect(t.con.complete('sv_a')).toEqual(['sv_airaccelerate']);
     expect(t.con.complete('k')).toEqual(['kill']);
+  });
+  it('autocorrects a clear typo and suggests when unsure', () => {
+    const t = setup();
+    t.run('kil');
+    expect(t.out).toEqual(['"kil" → kill', 'killed']);
+    t.run('sv_airaccelerat 90');
+    expect(t.aa()).toBe(90);
+    expect(t.con.complete('klil')).toEqual(['kill']);
+    t.con.command('fill', 'Fill.', () => {});
+    t.run('jill');
+    expect(t.out.at(-1)).toBe('Unknown command "jill". Did you mean fill, kill?');
   });
 });
 

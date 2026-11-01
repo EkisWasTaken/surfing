@@ -33,6 +33,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     <div class="flash" role="status" hidden></div>
     <div class="crosshair" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
     <div class="fps" hidden></div>
+    <p class="resumeHint" hidden>Click to play. Esc opens the menu.</p>
     <div class="consoleWrap" hidden>
       <section class="window console" role="dialog" aria-labelledby="consoleTitle">
         <header class="titlebar"><h2 id="consoleTitle">Console</h2><span class="gameName">help lists every command</span></header>
@@ -135,7 +136,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
                 <tr><td>Teleport to checkpoint (practice)</td><td>2</td></tr>
                 <tr><td>Chat (type !help for commands)</td><td>Y</td></tr>
                 <tr><td>Console (kill, retry, map, bind, sv_ settings: type help)</td><td>&#96; (key under Esc)</td></tr>
-                <tr><td>Open this menu</td><td>Esc</td></tr>
+                <tr><td>Open or close this menu</td><td>Esc</td></tr>
               </tbody>
             </table>
           </div>
@@ -338,7 +339,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       if (!hits.length || conInput.value.includes(' ')) return;
       let common = hits[0];
       for (const h of hits) while (!h.startsWith(common)) common = common.slice(0, -1);
-      conInput.value = hits.length === 1 ? hits[0] + ' ' : common;
+      conInput.value = hits.length === 1 ? hits[0] + ' ' : common.length >= conInput.value.trim().length ? common : conInput.value; // typo matches share no prefix
       showHint();
     }
   });
@@ -442,6 +443,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     },
     setSpeed: (u: number) => (speedVal.textContent = String(Math.round(u))),
     showOverlay: (show: boolean) => (overlay.hidden = !show),
+    showResume: (show: boolean) => ($('.resumeHint').hidden = !show),
     setTimer(t: string, bestText: string, practice = false) {
       $('.practiceTag').hidden = !practice;
       time.textContent = t;

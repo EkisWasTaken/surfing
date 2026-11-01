@@ -22,9 +22,23 @@ export function tokenize(line: string): string[][] {
   return out;
 }
 
+// Edit distance (typos: one insert, delete or change each).
+export function distance(a: string, b: string): number {
+  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
 export function createConsole() {
   const commands = new Map<string, Command>(), cvars = new Map<string, Cvar>();
   const names = () => [...commands.keys(), ...cvars.keys()].sort();
+  // Names within `max` typos of `word`, closest first.
+  const near = (word: string, max: number) =>
+    names().map((n) => [n, distance(word, n)] as const).filter(([, d]) => d <= max).sort((a, b) => a[1] - b[1]).map(([n, d]) => ({ n, d }));
   const self = {
     command(name: string, help: string, run: Command['run']) {
       commands.set(name, { help, run });
@@ -34,7 +48,19 @@ export function createConsole() {
     },
     execute(line: string, print: Print) {
       for (const [raw, ...args] of tokenize(line)) {
-        const name = raw.toLowerCase(), cmd = commands.get(name), cv = cvars.get(name);
+        let name = raw.toLowerCase();
+        if (!commands.has(name) && !cvars.has(name)) {
+          // Autocorrect: one clear closest name within two typos runs; otherwise suggest.
+          const hits = near(name, 2);
+          if (hits.length && hits[0].d < name.length && hits[1]?.d !== hits[0].d) {
+            print(`"${raw}" → ${hits[0].n}`, 'dim');
+            name = hits[0].n;
+          } else {
+            print(`Unknown command "${raw}"${hits.length ? `. Did you mean ${hits.slice(0, 3).map((h) => h.n).join(', ')}?` : ' (help lists them all)'}`, 'error');
+            continue;
+          }
+        }
+        const cmd = commands.get(name), cv = cvars.get(name);
         if (cmd) cmd.run(args, print);
         else if (cv && !args.length) {
           print(`"${name}" = "${cv.get()}"${cv.def ? ` ( def. "${cv.def()}" )` : ''}`);
@@ -42,25 +68,31 @@ export function createConsole() {
         } else if (cv) {
           const err = cv.set ? cv.set(args.join(' ')) : `${name} is read-only`;
           if (err) print(`${name}: ${err}`, 'error');
-        } else print(`Unknown command "${raw}"`, 'error');
+        }
       }
     },
-    // Names starting with the typed prefix (Tab completion).
-    complete: (prefix: string) => names().filter((n) => n.startsWith(prefix.toLowerCase())),
+    // Names starting with the typed prefix (Tab completion), or the closest ones for a typo.
+    complete: (prefix: string) => {
+      const p = prefix.toLowerCase(), hits = names().filter((n) => n.startsWith(p));
+      return hits.length || p.length < 3 ? hits : near(p, 2).map((h) => h.n);
+    },
     describe: (name: string) => commands.get(name)?.help ?? cvars.get(name)?.help ?? '',
   };
-  self.command('help', 'List everything, or explain one: help <name>.', (a, print) => {
+  self.command('help', 'List all, or help <name>', (a, print) => {
     if (a[0]) return print(self.describe(a[0].toLowerCase()) || `Unknown command "${a[0]}"`, self.describe(a[0].toLowerCase()) ? undefined : 'error');
-    self.execute('cmdlist; cvarlist', print);
+    print('Commands', 'dim');
+    self.execute('cmdlist', print);
+    print('Settings: type one to see it, add a value to set it', 'dim');
+    self.execute('cvarlist', print);
   });
-  self.command('cmdlist', 'List commands.', (_, print) => [...commands.keys()].sort().forEach((n) => print(`${n.padEnd(22)} ${commands.get(n)!.help}`)));
-  self.command('cvarlist', 'List settings (cvars) with their values.', (_, print) => [...cvars.keys()].sort().forEach((n) => print(`${n.padEnd(22)} = ${cvars.get(n)!.get().padEnd(8)} ${cvars.get(n)!.help}`)));
-  self.command('find', 'Search command and cvar names and help: find <text>.', (a, print) => {
+  self.command('cmdlist', 'List commands', (_, print) => [...commands.keys()].sort().forEach((n) => print(`  ${n.padEnd(26)} ${commands.get(n)!.help}`)));
+  self.command('cvarlist', 'List settings', (_, print) => [...cvars.keys()].sort().forEach((n) => print(`  ${(n + ' ' + cvars.get(n)!.get()).padEnd(26)} ${cvars.get(n)!.help}`)));
+  self.command('find', 'find <text>', (a, print) => {
     const q = (a[0] ?? '').toLowerCase(), hits = names().filter((n) => n.includes(q) || self.describe(n).toLowerCase().includes(q));
     if (!hits.length) print(`Nothing matches "${q}"`, 'dim');
     hits.forEach((n) => print(`${n.padEnd(22)} ${self.describe(n)}`));
   });
-  self.command('echo', 'Print text.', (a, print) => print(a.join(' ')));
+  self.command('echo', 'Print text', (a, print) => print(a.join(' ')));
   return self;
 }
 

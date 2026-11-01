@@ -204,7 +204,7 @@ function runCommand(name: string, args: string[]) {
 // ---------- Developer console (`) ----------
 const con = createConsole();
 const conPrint: Print = (t, tone) => hud.consolePrint(t, tone);
-let consoleFromGame = false;
+let consoleFromGame = false, consoleShown = false;
 function openConsole() {
   if (hud.consoleOpen()) return;
   consoleFromGame = input.locked();
@@ -212,6 +212,7 @@ function openConsole() {
   input.setTyping(true);
   held.clear();
   if (consoleFromGame) document.exitPointerLock(); // the mouse is for the console now, like CS's
+  if (!consoleShown) (consoleShown = true), con.execute('help', conPrint); // the first time: everything it knows
   hud.openConsole((line) => con.execute(line, conPrint), con.complete, () => {
     typing = false;
     input.setTyping(false);
@@ -236,16 +237,16 @@ function changeMap(query: string, print: Print) {
   hud.apply({ map: id });
 }
 
-con.command('kill', 'Die and respawn at the start, resetting your run.', () => respawn());
-con.command('explode', 'Same as kill, with more style.', () => respawn());
-con.command('restart', 'Restart your run at the start.', () => respawn());
-con.command('mp_restartgame', 'Restart your run: mp_restartgame 1.', () => respawn());
-con.command('retry', 'Reload the current map.', () => reloadMap());
-con.command('reconnect', 'Same as retry.', () => reloadMap());
-con.command('map', 'Change map: map <name> (part of the name is enough).', (a, p) => changeMap(a.join(' '), p));
-con.command('changelevel', 'Same as map.', (a, p) => changeMap(a.join(' '), p));
-con.command('maps', 'List maps: maps [filter].', (a, p) => hud.mapList().filter((m) => m.name.toLowerCase().includes((a[0] ?? '').toLowerCase())).forEach((m) => p(m.name)));
-con.command('status', 'Map, game, tick rate and your run.', (_, p) => {
+con.command('kill', 'Respawn at the start', () => respawn());
+con.command('explode', 'Respawn at the start', () => respawn());
+con.command('restart', 'Restart your run', () => respawn());
+con.command('mp_restartgame', 'Restart your run', () => respawn());
+con.command('retry', 'Reload the map', () => reloadMap());
+con.command('reconnect', 'Reload the map', () => reloadMap());
+con.command('map', 'Change map: map <name>', (a, p) => changeMap(a.join(' '), p));
+con.command('changelevel', 'Change map', (a, p) => changeMap(a.join(' '), p));
+con.command('maps', 'List maps', (a, p) => hud.mapList().filter((m) => m.name.toLowerCase().includes((a[0] ?? '').toLowerCase())).forEach((m) => p(m.name)));
+con.command('status', 'Map, game and your run', (_, p) => {
   p(`map     : ${mapShort(map)}`);
   p(`game    : ${gameName()} (${settings.game === 'cs16' ? '100 fps' : `${config.tickrate} tick`})`);
   p(`player  : ${player()}`);
@@ -253,17 +254,17 @@ con.command('status', 'Map, game, tick rate and your run.', (_, p) => {
   const pb = best();
   p(`best    : ${pb === null ? 'none yet' : formatTime(pb)}`);
 });
-con.command('noclip', "Fly through walls (jump up, crouch down). Runs won't count.", (_, p) => {
+con.command('noclip', 'Fly through walls', (_, p) => {
   noclip = !noclip;
   if (!noclip) (prev = cur = { ...cur, vel: vec() }), (simState = newTickState());
   p(`noclip ${noclip ? 'ON' : 'OFF'}`);
 });
-con.command('saveloc', 'Save a checkpoint (key 1).', () => saveCheckpoint());
-con.command('teleport', 'Go back to your checkpoint (key 2, practice).', () => teleportCheckpoint());
-con.command('say', 'Chat: say <text> (! commands work too).', (a) => a.length && onSay(a.join(' ')));
-con.command('clear', 'Clear the console.', () => hud.consoleClear());
-con.command('toggleconsole', 'Open or close the console (for binds).', () => (hud.consoleOpen() ? hud.closeConsole() : openConsole()));
-con.command('sv_defaults', "Put every sv_ setting back to this game's defaults.", (_, p) => {
+con.command('saveloc', 'Save a checkpoint', () => saveCheckpoint());
+con.command('teleport', 'Go to your checkpoint', () => teleportCheckpoint());
+con.command('say', 'Chat: say <text>', (a) => a.length && onSay(a.join(' ')));
+con.command('clear', 'Clear the console', () => hud.consoleClear());
+con.command('toggleconsole', 'Open or close the console', () => (hud.consoleOpen() ? hud.closeConsole() : openConsole()));
+con.command('sv_defaults', 'Reset all sv_ settings', (_, p) => {
   for (const k of SERVER_KEYS) (config as Record<string, unknown>)[k] = modeDefault(settings.game, k);
   p(`Server settings restored to ${gameName()} defaults.`);
 });
@@ -272,7 +273,7 @@ con.command('sv_defaults', "Put every sv_ setting back to this game's defaults."
 const SERVER = { sv_airaccelerate: 'airaccelerate', sv_accelerate: 'accelerate', sv_friction: 'friction', sv_stopspeed: 'stopspeed', sv_gravity: 'gravity', sv_maxspeed: 'maxspeed', sv_maxvelocity: 'maxvelocity' } as const;
 const SERVER_KEYS = Object.values(SERVER);
 const serverChanged = () => SERVER_KEYS.some((k) => config[k] !== modeDefault(settings.game, k));
-const SERVER_HELP: Record<string, string> = { sv_airaccelerate: 'Air acceleration (how hard strafing turns you in the air).', sv_accelerate: 'Ground acceleration.', sv_friction: 'Ground friction.', sv_stopspeed: 'Speed below which friction stops you faster.', sv_gravity: 'Gravity, units per second squared.', sv_maxspeed: 'Top running speed (250 with a knife).', sv_maxvelocity: 'Cap on speed along each axis.' };
+const SERVER_HELP: Record<string, string> = { sv_airaccelerate: 'Air acceleration', sv_accelerate: 'Ground acceleration', sv_friction: 'Ground friction', sv_stopspeed: 'Friction stop speed', sv_gravity: 'Gravity', sv_maxspeed: 'Top running speed', sv_maxvelocity: 'Speed cap per axis' };
 for (const [name, key] of Object.entries(SERVER))
   con.cvar(name, SERVER_HELP[name], {
     get: () => String(+config[key].toFixed(3)),
@@ -282,27 +283,27 @@ for (const [name, key] of Object.entries(SERVER))
       if (serverChanged()) conPrint("Server settings now differ from the defaults: runs won't be saved as records (sv_defaults restores them).", 'dim');
     }),
   });
-con.cvar('sv_autobunnyhopping', 'Jump again automatically while holding jump (1 on, 0 off).', {
+con.cvar('sv_autobunnyhopping', 'Auto bunnyhop (0/1)', {
   get: () => (settings.autobhop ? '1' : '0'),
   def: () => '1',
   set: (v) => (bool(v) === null ? 'expects 0 or 1' : void hud.apply({ autobhop: bool(v)! })),
 });
-con.cvar('sensitivity', 'Mouse sensitivity (CS scale).', { get: () => String(settings.sensitivity), def: () => '2', set: num(0.01, 20, (n) => hud.apply({ sensitivity: n })) });
-for (const name of ['fov_desired', 'default_fov']) con.cvar(name, 'Field of view (horizontal at 4:3).', { get: () => String(settings.fov), def: () => '90', set: num(60, 130, (n) => hud.apply({ fov: n })) });
-con.cvar('name', 'Your name in chat.', { get: () => settings.name, set: (v) => (v.trim() ? void hud.apply({ name: v.trim().slice(0, 31) }) : 'name cannot be empty') });
-con.cvar('game', 'Movement rules, knife and HUD: csgo or cs16.', {
+con.cvar('sensitivity', 'Mouse sensitivity', { get: () => String(settings.sensitivity), def: () => '2', set: num(0.01, 20, (n) => hud.apply({ sensitivity: n })) });
+for (const name of ['fov_desired', 'default_fov']) con.cvar(name, 'Field of view', { get: () => String(settings.fov), def: () => '90', set: num(60, 130, (n) => hud.apply({ fov: n })) });
+con.cvar('name', 'Your chat name', { get: () => settings.name, set: (v) => (v.trim() ? void hud.apply({ name: v.trim().slice(0, 31) }) : 'name cannot be empty') });
+con.cvar('game', 'csgo or cs16', {
   get: () => settings.game,
   def: () => 'csgo',
   set: (v) => (v === 'csgo' || v === 'cs16' ? void hud.apply({ game: v }) : 'expects csgo or cs16'),
 });
-con.cvar('tickrate', 'Physics ticks per second: 64 or 128 (CS:GO; CS 1.6 runs at 100 fps).', {
+con.cvar('tickrate', '64 or 128 (CS:GO only)', {
   get: () => String(config.tickrate),
   def: () => (settings.game === 'cs16' ? '100' : '64'),
   set: (v) => (settings.game === 'cs16' ? 'CS 1.6 always runs at 100 fps' : v === '64' || v === '128' ? void hud.apply({ tickrate: v === '128' ? 128 : 64 }) : 'expects 64 or 128'),
 });
-con.cvar('cl_showfps', 'Show frames per second (top left).', { get: () => (showFps ? '1' : '0'), def: () => '0', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void (showFps = bool(v)!)) });
-con.cvar('cl_showspeed', 'Show your speed on the HUD.', { get: () => (settings.showSpeed ? '1' : '0'), def: () => '1', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void hud.apply({ showSpeed: bool(v)! })) });
-con.cvar('cl_ghost', 'Race a ghost of your best run.', { get: () => (settings.showGhost ? '1' : '0'), def: () => '1', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void hud.apply({ showGhost: bool(v)! })) });
+con.cvar('cl_showfps', 'Show FPS (0/1)', { get: () => (showFps ? '1' : '0'), def: () => '0', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void (showFps = bool(v)!)) });
+con.cvar('cl_showspeed', 'Show speed (0/1)', { get: () => (settings.showSpeed ? '1' : '0'), def: () => '1', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void hud.apply({ showSpeed: bool(v)! })) });
+con.cvar('cl_ghost', 'Ghost of your best (0/1)', { get: () => (settings.showGhost ? '1' : '0'), def: () => '1', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void hud.apply({ showGhost: bool(v)! })) });
 
 // Binds: CS key names → console commands, kept in this browser. "+jump" sets the jump key instead.
 const BINDS = 'surf-binds';
@@ -322,7 +323,7 @@ function runBind(key: string) {
 // CS key name back to a KeyboardEvent.code (for +jump, which the movement input reads by code).
 const KEY_CODES = [...'abcdefghijklmnopqrstuvwxyz'].map((c) => `Key${c.toUpperCase()}`).concat([...'0123456789'].map((d) => `Digit${d}`), Array.from({ length: 12 }, (_, i) => `F${i + 1}`), ['Space', 'Enter', 'Tab', 'Backspace', 'ShiftLeft', 'ControlLeft', 'AltLeft', 'CapsLock', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Insert', 'Delete', 'Home', 'End', 'PageUp', 'PageDown'], Array.from({ length: 10 }, (_, i) => `Numpad${i}`));
 const codeFor = (key: string) => (key === 'mwheelup' ? 'WheelUp' : key === 'mwheeldown' ? 'WheelDown' : KEY_CODES.find((c) => keyName(c) === key) ?? null);
-con.command('bind', 'Bind a key: bind <key> "<commands>" (bind <key> shows it). +jump sets your jump key.', (a, p) => {
+con.command('bind', 'bind <key> "<command>"', (a, p) => {
   const key = (a[0] ?? '').toLowerCase();
   if (!key) return p('Usage: bind <key> "<commands>", e.g. bind f "kill"', 'error');
   if (key === '`' || key === 'escape') return p(`${key} is reserved`, 'error');
@@ -338,17 +339,17 @@ con.command('bind', 'Bind a key: bind <key> "<commands>" (bind <key> shows it). 
   binds[key] = cmd;
   saveBinds();
 });
-con.command('unbind', 'Remove a key binding: unbind <key>.', (a, p) => {
+con.command('unbind', 'unbind <key>', (a, p) => {
   const key = (a[0] ?? '').toLowerCase();
   if (!binds[key]) return p(`"${key}" is not bound`, 'dim');
   delete binds[key];
   saveBinds();
 });
-con.command('unbindall', 'Remove all your key bindings.', () => {
+con.command('unbindall', 'Remove all binds', () => {
   binds = {};
   saveBinds();
 });
-con.command('bindlist', 'List your key bindings.', (_, p) => {
+con.command('bindlist', 'List your binds', (_, p) => {
   const keys = Object.keys(binds).sort();
   if (!keys.length) p('No bindings yet. Try: bind f "kill"', 'dim');
   keys.forEach((k) => p(`${k.padEnd(12)} "${binds[k]}"`));
@@ -512,12 +513,27 @@ fetch('/maps/index.json')
   })
   .catch(() => {}); // no dev server endpoint (e.g. static build): built-in maps and file loading still work
 
+// Esc closed the menu, but browsers don't hand the mouse back on Esc: the game waits for a click.
+let menuClosed = false;
+const showMenu = (open: boolean) => {
+  menuClosed = !open;
+  hud.showOverlay(open);
+  hud.showResume(!open);
+};
 input.onLockChange((locked) => {
-  hud.showOverlay(!locked);
+  if (locked) menuClosed = false;
+  hud.showOverlay(!locked && !menuClosed);
+  hud.showResume(!locked && menuClosed);
   acc.reset();
   held.clear();
 });
 window.addEventListener('keydown', (e) => {
+  // In game, Esc is the browser's own: it releases the mouse and the menu opens. Out of game it toggles the menu.
+  if (e.key === 'Escape' && !typing && !input.locked() && !e.repeat) {
+    showMenu(menuClosed);
+    if (menuClosed) input.requestLock(); // usually refused right after Esc; then the hint asks for a click
+    return;
+  }
   if ((e.code === 'Backquote' || e.key === '`') && !typing && !e.repeat) { // the key under Esc, whatever the layout prints on it
     e.preventDefault();
     return openConsole();

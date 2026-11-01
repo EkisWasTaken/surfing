@@ -1,6 +1,8 @@
 // CS2 (Source 2) model reader: static geometry + color textures from a .vmdl_c (embedded meshes, meshopt buffers).
 // Positions stay in Source model space (inches, Z up).
 import { MeshoptDecoder } from 'meshoptimizer';
+// @ts-expect-error untyped JS reference build
+import { MeshoptDecoder as MeshoptReference } from 'meshoptimizer/meshopt_decoder_reference.js';
 import { parseKV3, resourceBlocks } from './kv3';
 import { readVtex, Vtex } from './cs2';
 
@@ -30,7 +32,9 @@ function decodeBuffer(desc: Any, raw: Uint8Array, isIndex: boolean): Uint8Array 
   if (!desc.m_bMeshoptCompressed) return raw.subarray(0, count * size);
   if (desc.m_bCompressedZSTD) throw new Error('cs2model: zstd-compressed buffers are not supported');
   const out = new Uint8Array(count * size);
-  if (!isIndex) MeshoptDecoder.decodeVertexBuffer(out, count, size, raw);
+  // The WASM 0.25 build flips the top bit of some bytes in CS2's v1-encoded vertex buffers (UV v, packed normal);
+  // the reference decoder gets them right (smooth UVs that match the textures).
+  if (!isIndex) MeshoptReference.decodeVertexBuffer(out, count, size, raw);
   else if (desc.m_bMeshoptIndexSequence) MeshoptDecoder.decodeIndexSequence(out, count, size, raw);
   else MeshoptDecoder.decodeIndexBuffer(out, count, size, raw);
   return out;
@@ -57,8 +61,7 @@ function vertices(desc: Any, data: Uint8Array) {
     const read =
       uv.m_Format === R32G32_FLOAT ? (k: number) => dv.getFloat32(u + k * 4, true)
       : uv.m_Format === R16G16_FLOAT ? (k: number) => half(dv.getUint16(u + k * 2, true))
-            // CS2 packs a flag in the sign bit of SNORM UVs (neighbours read +0.713 / -0.718): the coordinate is the magnitude.
-      : uv.m_Format === R16G16_SNORM ? (k: number) => Math.min(1, Math.abs(dv.getInt16(u + k * 2, true)) / 32767)
+      : uv.m_Format === R16G16_SNORM ? (k: number) => dv.getInt16(u + k * 2, true) / 32767
       : () => 0;
     uvs[i * 2] = read(0);
     uvs[i * 2 + 1] = read(1);
