@@ -1,7 +1,7 @@
 // Port of Source CGameMovement (FullWalkMove path) with CS:GO values from config.
 import { Vec3, vec, copy, add, sub, scale, dot, cross, length, normalize, angleVectors } from './math';
 import { Brush } from './brush';
-import { trace } from './trace';
+import { trace, DIST_EPSILON } from './trace';
 import { config } from './config';
 
 export type Player = { pos: Vec3; vel: Vec3; onGround: boolean; ducked: boolean; groundNormal: Vec3 | null };
@@ -68,6 +68,11 @@ function tryPlayerMove(s: State) {
       s.vel = vec();
       return;
     }
+    // Rampbug fix: float error leaves us closer than DIST_EPSILON to a slope, so every bump
+    // hits it at fraction 0 and Source zeroes velocity. Step back out instead.
+    if (!config.rampbug && tr.fraction === 0 && tr.normal && tr.normal.z < 0.7) {
+      s.pos = add(s.pos, scale(tr.normal, DIST_EPSILON));
+    }
     if (tr.fraction > 0) {
       s.pos = tr.endPos;
       original = copy(s.vel);
@@ -78,6 +83,12 @@ function tryPlayerMove(s: State) {
     if (planes.length >= MAX_CLIP_PLANES) {
       s.vel = vec();
       break;
+    }
+    // Rampbug fix (Quake 2 PM_StepSlideMove): re-hitting the same plane would make a zero crease
+    // vector and kill all speed; nudge velocity out along it instead.
+    if (!config.rampbug && planes.some((p) => dot(p, tr.normal!) > 0.99)) {
+      s.vel = add(s.vel, tr.normal!);
+      continue;
     }
     planes.push(tr.normal!);
 
@@ -172,6 +183,23 @@ function categorizePosition(s: State) {
   s.groundNormal = ok ? tr.normal : null;
 }
 
+// Instant duck (no CS:GO duck-speed transition). In the air the feet pull up so the head stays put.
+function duck(s: State, wantDuck: boolean) {
+  const lift = vec(0, 0, config.hullStand.maxs.z - config.hullDuck.maxs.z);
+  const fits = (pos: Vec3, h: { mins: Vec3; maxs: Vec3 }) => !trace(pos, pos, h.mins, h.maxs, s.brushes).startSolid;
+  if (wantDuck && !s.ducked) {
+    s.ducked = true;
+    if (!s.onGround && fits(add(s.pos, lift), config.hullDuck)) s.pos = add(s.pos, lift);
+  } else if (!wantDuck && s.ducked) {
+    const candidates = s.onGround ? [s.pos] : [sub(s.pos, lift), s.pos];
+    const ok = candidates.find((p) => fits(p, config.hullStand));
+    if (ok) {
+      s.pos = ok;
+      s.ducked = false;
+    }
+  }
+}
+
 function checkVelocity(s: State) {
   const m = config.maxvelocity;
   const c = (v: number) => Math.max(-m, Math.min(m, v));
@@ -181,6 +209,7 @@ function checkVelocity(s: State) {
 export function step(p: Player, cmd: Cmd, brushes: Brush[], dt: number): Player {
   const s: State = { ...p, pos: copy(p.pos), vel: copy(p.vel), brushes, dt };
 
+  duck(s, cmd.duck);
   s.vel.z -= config.gravity * 0.5 * dt;
   if (cmd.jump && s.onGround && config.autobhop) {
     s.onGround = false;
