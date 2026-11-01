@@ -12,6 +12,14 @@ const MAX_CLIP_PLANES = 5;
 
 export const newPlayer = (pos: Vec3): Player => ({ pos: copy(pos), vel: vec(), onGround: false, ducked: false, groundNormal: null, jumpHeld: false });
 
+// Map spawns and teleport destinations often sit exactly on a floor (counts as inside): lift until the hull fits.
+export function unstick(pos: Vec3, brushes: Brush[]): Vec3 {
+  const { mins, maxs } = config.hullStand;
+  let p = pos;
+  for (let dz = 0; dz < 72 && trace(p, p, mins, maxs, brushes).startSolid; dz += 4) p = add(p, vec(0, 0, 4));
+  return p;
+}
+
 export function clipVelocity(v: Vec3, n: Vec3, overbounce: number): Vec3 {
   let out = sub(v, scale(n, dot(v, n) * overbounce));
   const adjust = dot(out, n);

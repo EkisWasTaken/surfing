@@ -7,9 +7,9 @@ import type { MapDef } from './maps';
 import { bspToMap, goalBox, saveGoal } from './maps/imported';
 import { parseBsp } from './bsp';
 import { createGrid } from './grid';
-import { step, newPlayer, Player } from './movement';
+import { step, newPlayer, unstick, Player } from './movement';
 import { trace } from './trace';
-import { createAccumulator } from './loop';
+import { createAccumulator, tickYaw } from './loop';
 import { createInput } from './input';
 import { createRenderer } from './render';
 import { createHud } from './hud';
@@ -32,6 +32,7 @@ let grid = createGrid(map.brushes);
 let prev: Player, cur: Player;
 let run: Run = newRun();
 let best = loadBest(map.id);
+let lastTickYaw = 0; // yaw the previous tick used, for spreading mouse turn across ticks
 
 const touching = (p: Player, zone: Brush[] | null) => {
   if (!zone) return false;
@@ -42,15 +43,14 @@ const touching = (p: Player, zone: Brush[] | null) => {
 function respawn() {
   prev = cur = newPlayer(map.spawn);
   input.setView(map.spawnYaw, 0);
+  lastTickYaw = map.spawnYaw;
   run = newRun();
 }
 
 function useMap(m: MapDef) {
   map = m;
   grid = createGrid(m.brushes);
-  // Map spawns can sit a hair inside the floor; lift until the hull fits, or every tick would respawn.
-  const { mins, maxs } = config.hullStand;
-  for (let dz = 0; dz <= 72 && trace(m.spawn, m.spawn, mins, maxs, m.brushes).startSolid; dz += 4) m.spawn = add(m.spawn, vec(0, 0, 4));
+  m.spawn = unstick(m.spawn, m.brushes);
   renderer.setMap(m);
   best = loadBest(m.id);
   respawn();
@@ -122,8 +122,9 @@ function tick(cmd: ReturnType<typeof input.cmd>, tickDt: number) {
   const tp = map.teleports.find((t) => touching(cur, t.brushes));
   if (tp) {
     // shortcut: teleports zero velocity (what surf servers do); Source's trigger_teleport keeps it.
-    prev = cur = { ...cur, pos: tp.dest, vel: vec(), onGround: false };
+    prev = cur = { ...cur, pos: unstick(tp.dest, grid.query(sub(tp.dest, vec(256, 256, 256)), add(tp.dest, vec(256, 256, 256)))), vel: vec(), onGround: false };
     input.setView(tp.yaw, input.view().pitch);
+    lastTickYaw = tp.yaw;
   }
   const was = run.phase;
   run = tickRun(run, touching(cur, map.startZone), touching(cur, map.endZone), tickDt);
@@ -143,7 +144,11 @@ function frame(now: number) {
     if (ticks) {
       const cmd = input.cmd();
       const tickDt = 1 / config.tickrate;
-      for (let i = 0; i < ticks; i++) tick(cmd, tickDt);
+      const from = lastTickYaw;
+      for (let i = 0; i < ticks; i++) {
+        lastTickYaw = tickYaw(from, cmd.yaw, i, ticks);
+        tick({ ...cmd, yaw: lastTickYaw }, tickDt);
+      }
     }
   }
   // Interpolate the eye point itself so crouch height changes don't snap the camera.

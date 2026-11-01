@@ -117,7 +117,7 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
   const byName = new Map(entities.filter((e) => e.targetname).map((e) => [e.targetname, e]));
   const modelOf = (e: Entity) => (e.model?.startsWith('*') ? modelBrushes(Number(e.model.slice(1)), null) : []);
 
-  const spawnEnt = ['info_player_terrorist', 'info_player_counterterrorist', 'info_player_start'].map((c) => entities.find((e) => e.classname === c)).find(Boolean);
+  const spawnEnt = ['info_player_terrorist', 'info_player_counterterrorist', 'info_player_start', 'info_player_teamspawn', 'info_player_deathmatch'].map((c) => entities.find((e) => e.classname === c)).find(Boolean);
   const teleports: Teleport[] = entities
     .filter((e) => e.classname === 'trigger_teleport' && e.target && byName.has(e.target))
     .map((e) => {

@@ -95,3 +95,16 @@ describe('autobhop off', () => {
     }
   });
 });
+
+import { unstick } from '../src/movement';
+
+describe('unstick', () => {
+  it('lifts a point sitting exactly on a floor surface until the hull fits', () => {
+    const p = unstick(vec(0, 0, 0), [floor]);
+    expect(p.z).toBeGreaterThan(0);
+    expect(p.z).toBeLessThanOrEqual(4);
+  });
+  it('leaves a free point alone', () => {
+    expect(unstick(vec(0, 0, 10), [floor])).toEqual(vec(0, 0, 10));
+  });
+});

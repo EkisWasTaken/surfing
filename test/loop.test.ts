@@ -48,3 +48,12 @@ describe('bindings', () => {
     expect(bindLabel('WheelDown')).toBe('Mouse wheel down');
   });
 });
+
+import { tickYaw } from '../src/loop';
+
+describe('tickYaw', () => {
+  it('spreads a frame of mouse turn evenly across its ticks', () => {
+    expect([0, 1].map((i) => tickYaw(10, 20, i, 2))).toEqual([15, 20]);
+    expect(tickYaw(10, 20, 0, 1)).toBe(20);
+  });
+});

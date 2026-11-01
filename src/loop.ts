@@ -15,3 +15,7 @@ export function createAccumulator(tickDt: number) {
     },
   };
 }
+
+// Mouse is read once per frame; give each tick its share of the turn, as if sampled every tick.
+// Without this, extra ticks in a frame get no turn and air strafing loses up to half its gain.
+export const tickYaw = (fromYaw: number, toYaw: number, i: number, ticks: number) => fromYaw + ((toYaw - fromYaw) * (i + 1)) / ticks;

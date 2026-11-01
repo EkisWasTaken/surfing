@@ -80,3 +80,12 @@ describe('parseBsp', () => {
     expect(() => parseBsp(buildBsp({ entities, world: [floor], submodels: [], lzmaLump: true }), 'x')).toThrow(/compressed/);
   });
 });
+
+describe('spawn entity types', () => {
+  it('falls back to info_player_teamspawn (maps ported from other Source games)', () => {
+    const ents = `{ "classname" "worldspawn" }\n{ "classname" "info_player_teamspawn" "origin" "-64 1984 1664" "angles" "0 270 0" }`;
+    const m = parseBsp(buildBsp({ entities: ents, world: [floor], submodels: [] }), 'tf');
+    expect(m.spawn).toEqual({ x: -64, y: 1984, z: 1664 });
+    expect(m.spawnYaw).toBe(270);
+  });
+});
