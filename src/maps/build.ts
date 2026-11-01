@@ -18,6 +18,8 @@ export type MapDef = {
   pak?: BspMap['pak'];
   props?: BspMap['props'];
   lightmap?: BspMap['lightmap'];
+  skyName?: string;
+  fog?: BspMap['fog'];
 };
 
 type Section = { angle: number; width: number };

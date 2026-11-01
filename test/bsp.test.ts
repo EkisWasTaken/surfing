@@ -234,3 +234,18 @@ describe('brush entity faces', () => {
     expect(xs).toEqual([984, 1016, 1016]); // triangle x = -16, 16, 16 shifted by the origin
   });
 });
+
+describe('sky and fog', () => {
+  it('reads the skybox name and an enabled env_fog_controller', () => {
+    const ents = `{ "classname" "worldspawn" "skyname" "sky_day01_09" }
+{ "classname" "env_fog_controller" "fogenable" "1" "fogcolor" "255 128 0" "fogstart" "500" "fogend" "4000" "fogmaxdensity" ".8" }`;
+    const m = parseBsp(buildBsp({ entities: ents, world: [floor], submodels: [] }), 'f');
+    expect(m.skyName).toBe('sky_day01_09');
+    expect(m.fog).toEqual({ color: [1, 128 / 255, 0], start: 500, end: 4000, max: 0.8 });
+  });
+  it('has no fog when the controller is off or missing', () => {
+    expect(parseBsp(file(), 't').fog).toBeNull();
+    const off = `{ "classname" "worldspawn" }\n{ "classname" "env_fog_controller" "fogenable" "0" "fogcolor" "1 2 3" }`;
+    expect(parseBsp(buildBsp({ entities: off, world: [floor], submodels: [] }), 'o').fog).toBeNull();
+  });
+});

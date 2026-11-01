@@ -2,7 +2,16 @@
 import * as THREE from 'three';
 import type { Vtf } from './vtf';
 import { parseVtf, decodeDxt } from './vtf';
-import { resolveMaterial } from './materials';
+import { resolveMaterial, FileSource } from './materials';
+
+// The map's own fog (env_fog_controller); fogMax 0 = no fog, like CS:GO maps without a controller.
+export type Fog = { fogColor: { value: THREE.Color }; fogStart: { value: number }; fogEnd: { value: number }; fogMax: { value: number } };
+export const FOG_GLSL = /* glsl */ `
+  uniform vec3 fogColor; uniform float fogStart; uniform float fogEnd; uniform float fogMax;
+  vec3 applyFog(vec3 c, vec3 world) {
+    float f = fogMax * clamp((length(world - cameraPosition) - fogStart) / max(fogEnd - fogStart, 1.0), 0.0, 1.0);
+    return mix(c, fogColor, f);
+  }`;
 
 const S3TC: Record<string, THREE.CompressedPixelFormat> = {
   dxt1: THREE.RGB_S3TC_DXT1_Format,
@@ -30,7 +39,7 @@ function toTexture(v: Vtf, s3tc: boolean): { texture: THREE.Texture; cpu: boolea
 }
 
 // lightmap: the map's baked light atlas (world faces, which carry an lmUv attribute); null for props.
-function texturedMaterial(map: THREE.Texture, alphatest: boolean, translucent: boolean, sun: THREE.Vector3, haze: THREE.Color, lightmap: THREE.Texture | null) {
+function texturedMaterial(map: THREE.Texture, alphatest: boolean, translucent: boolean, sun: THREE.Vector3, fog: Fog, lightmap: THREE.Texture | null) {
   const defines: Record<string, number> = {};
   if (alphatest) defines.ALPHATEST = 1;
   if (lightmap) defines.LIGHTMAP = 1;
@@ -38,7 +47,7 @@ function texturedMaterial(map: THREE.Texture, alphatest: boolean, translucent: b
     transparent: translucent,
     depthWrite: !translucent,
     defines,
-    uniforms: { map: { value: map }, lightmap: { value: lightmap }, exposure: { value: lightmap?.userData.exposure ?? 1 }, sun: { value: sun }, haze: { value: haze } },
+    uniforms: { map: { value: map }, lightmap: { value: lightmap }, exposure: { value: lightmap?.userData.exposure ?? 1 }, sun: { value: sun }, ...fog },
     vertexShader: /* glsl */ `
       varying vec2 vUv; varying vec3 vNormal; varying vec3 vWorld;
       #ifdef LIGHTMAP
@@ -54,7 +63,8 @@ function texturedMaterial(map: THREE.Texture, alphatest: boolean, translucent: b
         gl_Position = projectionMatrix * viewMatrix * w;
       }`,
     fragmentShader: /* glsl */ `
-      uniform sampler2D map; uniform sampler2D lightmap; uniform float exposure; uniform vec3 sun; uniform vec3 haze;
+      uniform sampler2D map; uniform sampler2D lightmap; uniform float exposure; uniform vec3 sun;
+      ${FOG_GLSL}
       varying vec2 vUv; varying vec3 vNormal; varying vec3 vWorld;
       #ifdef LIGHTMAP
         varying vec2 vLm;
@@ -73,8 +83,7 @@ function texturedMaterial(map: THREE.Texture, alphatest: boolean, translucent: b
           // Props have no lightmap: mostly unlit with a little sun shading for depth.
           vec3 lit = tex.rgb * (0.72 + 0.38 * max(dot(normalize(vNormal), sun), 0.0));
         #endif
-        float fog = 1.0 - exp(-length(vWorld - cameraPosition) / 30000.0);
-        gl_FragColor = vec4(mix(lit, haze, fog * 0.6), tex.a);
+        gl_FragColor = vec4(applyFog(lit, vWorld), tex.a);
         #include <colorspace_fragment>
       }`,
   });
@@ -82,7 +91,7 @@ function texturedMaterial(map: THREE.Texture, alphatest: boolean, translucent: b
 
 // One material per texture group; null where the texture isn't packed or can't be decoded.
 // Builds materials from a map's pakfile, caching by resolved name so props sharing a texture share a material.
-export function createMaterialSource(pak: Map<string, Uint8Array>, s3tc: boolean, sun: THREE.Vector3, haze: THREE.Color, lightmap: THREE.Texture | null) {
+export function createMaterialSource(pak: Map<string, Uint8Array>, s3tc: boolean, sun: THREE.Vector3, fog: Fog, lightmap: THREE.Texture | null) {
   const cache = new Map<string, THREE.Material | null>();
   const stats = { gpu: 0, cpu: 0, missing: 0 };
   const build = (name: string, lit: boolean): THREE.Material | null => {
@@ -100,13 +109,13 @@ export function createMaterialSource(pak: Map<string, Uint8Array>, s3tc: boolean
       const t = new THREE.DataTexture(new Uint8Array([c[0], c[1], c[2], 255]), 1, 1, THREE.RGBAFormat);
       t.needsUpdate = true;
       stats.gpu++;
-      return texturedMaterial(t, false, false, sun, haze, lm);
+      return texturedMaterial(t, false, false, sun, fog, lm);
     }
     const v = parseVtf(m.vtf);
     if (!v) return null;
     const { texture, cpu } = toTexture(v, s3tc);
     stats[cpu ? 'cpu' : 'gpu']++;
-    return texturedMaterial(texture, m.alphatest, m.translucent, sun, haze, lm);
+    return texturedMaterial(texture, m.alphatest, m.translucent, sun, fog, lm);
   };
   return {
     // First candidate path that resolves wins (models list one per cdmaterials dir).
@@ -131,4 +140,14 @@ export function createMaterialSource(pak: Map<string, Uint8Array>, s3tc: boolean
       cache.clear();
     },
   };
+}
+
+// A skybox face texture (materials/skybox/<sky><face>), clamped so the cube's seams don't bleed.
+export function skyTexture(name: string, pak: FileSource, s3tc: boolean): THREE.Texture | null {
+  const m = resolveMaterial(name, pak);
+  const v = m?.vtf && parseVtf(m.vtf);
+  if (!v) return null;
+  const { texture } = toTexture(v, s3tc);
+  texture.wrapS = texture.wrapT = THREE.ClampToEdgeWrapping;
+  return texture;
 }

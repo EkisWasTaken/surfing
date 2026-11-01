@@ -18,6 +18,8 @@ export type BspMap = {
   lightmap: { width: number; height: number; data: Uint8Array; exposure: number };
   pak: Map<string, Uint8Array>; // files packed in the map (materials, textures, models)
   props: StaticProp[];
+  skyName: string; // worldspawn skyname: materials/skybox/<name>{rt,bk,lf,ft,up,dn}
+  fog: { color: number[]; start: number; end: number; max: number } | null; // env_fog_controller, sRGB 0–1 color
   spawn: Vec3;
   spawnYaw: number;
   teleports: Teleport[];
@@ -198,6 +200,13 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
     startZone: zone(/start|begin/i, 'trigger_momentum_timer_start'),
     endZone: zone(/end|finish/i, 'trigger_momentum_timer_stop'),
     killZ: models[0].minZ - 1000,
+    skyName: entities.find((e) => e.classname === 'worldspawn')?.skyname ?? '',
+    fog: (() => {
+      const f = entities.find((e) => e.classname === 'env_fog_controller' && e.fogenable === '1');
+      if (!f) return null;
+      const c = parseVec(f.fogcolor);
+      return { color: [c.x, c.y, c.z].map((v) => v / 255), start: Number(f.fogstart) || 0, end: Number(f.fogend) || 10000, max: f.fogmaxdensity === undefined ? 1 : Number(f.fogmaxdensity) };
+    })(),
   };
 
   // Static props live in the 'sprp' game lump. Entry size varies by version, so derive it from the lump length.

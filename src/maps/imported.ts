@@ -44,6 +44,8 @@ export function bspToMap(bsp: BspMap, fileName: string): MapDef & { goalFromMap:
     mesh: bsp.mesh,
     props: bsp.props,
     lightmap: bsp.lightmap,
+    skyName: bsp.skyName,
+    fog: bsp.fog,
     pak: bsp.pak,
   };
 }

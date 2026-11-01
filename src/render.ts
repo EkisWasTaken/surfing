@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { Brush } from './brush';
 import type { Vec3 } from './math';
 import { sandstone, limestone } from './textures';
-import { createMaterialSource } from './mapMaterials';
+import { createMaterialSource, skyTexture, FOG_GLSL, Fog } from './mapMaterials';
 import { parseModel } from './mdl';
 import { createViewmodel } from './viewmodel';
 import type { Pose } from './viewmodelPose';
@@ -16,6 +16,9 @@ const SUN = new THREE.Vector3(0.45, 0.42, -0.79).normalize();
 const HORIZON = new THREE.Color('#f0d2a0');
 const ZENITH = new THREE.Color('#5a8cc2');
 const GROUND = new THREE.Color('#c6a273');
+// Imported maps without a packed skybox get a neutral sky instead of the desert one.
+const NEUTRAL = { horizon: new THREE.Color('#b8c3cc'), zenith: new THREE.Color('#5f86b3'), ground: new THREE.Color('#6b6f72') };
+const mapFog: Fog = { fogColor: { value: new THREE.Color() }, fogStart: { value: 0 }, fogEnd: { value: 1 }, fogMax: { value: 0 } };
 
 // Triplanar world-space texturing (one texture repeat per `scale` units), sun shading, distance haze.
 function texture(image: HTMLCanvasElement) {
@@ -32,7 +35,7 @@ function surfaceMaterial(image: HTMLCanvasElement, scale: number, flat?: HTMLCan
   return new THREE.ShaderMaterial({
     defines: flat ? { BSP: 1 } : {},
     vertexColors: !!flat,
-    uniforms: { map: { value: texture(image) }, flatMap: { value: texture(flat ?? image) }, lightmap: { value: null }, exposure: { value: 1 }, scale: { value: scale }, sun: { value: SUN }, haze: { value: HORIZON } },
+    uniforms: { map: { value: texture(image) }, flatMap: { value: texture(flat ?? image) }, lightmap: { value: null }, exposure: { value: 1 }, scale: { value: scale }, sun: { value: SUN }, haze: { value: HORIZON }, ...mapFog },
     vertexShader: /* glsl */ `
       varying vec3 vWorld; varying vec3 vNormal; varying vec3 vTint;
       #ifdef BSP
@@ -53,6 +56,7 @@ function surfaceMaterial(image: HTMLCanvasElement, scale: number, flat?: HTMLCan
       }`,
     fragmentShader: /* glsl */ `
       uniform sampler2D map; uniform sampler2D flatMap; uniform sampler2D lightmap; uniform float exposure; uniform float scale; uniform vec3 sun; uniform vec3 haze;
+      ${FOG_GLSL}
       varying vec3 vWorld; varying vec3 vNormal; varying vec3 vTint;
       #ifdef BSP
         varying vec2 vLm;
@@ -73,8 +77,12 @@ function surfaceMaterial(image: HTMLCanvasElement, scale: number, flat?: HTMLCan
           float diffuse = max(dot(n, sun), 0.0);
           vec3 color = albedo * (vec3(0.42, 0.38, 0.36) + vec3(1.0, 0.9, 0.75) * diffuse * 0.85);
         #endif
-        float fog = 1.0 - exp(-length(vWorld - cameraPosition) / 24000.0);
-        gl_FragColor = vec4(mix(color, haze, fog * 0.75), 1.0);
+        #ifdef BSP
+          gl_FragColor = vec4(applyFog(color, vWorld), 1.0); // imported maps: only the map's own fog
+        #else
+          float fog = 1.0 - exp(-length(vWorld - cameraPosition) / 24000.0);
+          gl_FragColor = vec4(mix(color, haze, fog * 0.75), 1.0); // built-in desert maps: warm haze
+        #endif
         #include <colorspace_fragment>
       }`,
   });
@@ -161,6 +169,55 @@ function boxGeometry(b: Brush): THREE.BufferGeometry {
   return g.translate(c.x, c.y, c.z);
 }
 
+// Source skybox: six faces named rt/bk/lf/ft/up/dn, laid out like Quake's (st_to_vec): for each face,
+// which Source axis gets ±s (image across), ±t (image up) or the fixed ±1 side.
+const SKY_FACES: [string, number[]][] = [
+  ['rt', [3, -1, 2]], ['bk', [-3, 1, 2]], ['lf', [1, 3, 2]], ['ft', [-1, -3, 2]], ['up', [-2, -1, 3]], ['dn', [2, -1, -3]],
+];
+
+function skyboxGroup(name: string, pak: Map<string, Uint8Array>, s3tc: boolean): THREE.Group | null {
+  const group = new THREE.Group();
+  for (const [suffix, axes] of SKY_FACES) {
+    const tex = skyTexture(`skybox/${name}${suffix}`, pak, s3tc);
+    if (!tex) {
+      if (suffix === 'dn') continue; // many skyboxes ship without a bottom face
+      group.traverse((o) => o instanceof THREE.Mesh && (o.material.uniforms.map.value.dispose(), o.geometry.dispose()));
+      return null;
+    }
+    const pos: number[] = [], uv: number[] = [];
+    for (const [s, t] of [[-1, -1], [1, -1], [1, 1], [-1, -1], [1, 1], [-1, 1]]) {
+      const v = axes.map((k) => Math.sign(k) * (Math.abs(k) === 1 ? s : Math.abs(k) === 2 ? t : 1));
+      const p = toThree({ x: v[0], y: v[1], z: v[2] });
+      pos.push(p.x, p.y, p.z);
+      uv.push((s + 1) / 2, (1 - t) / 2); // VTF rows start at the top of the image
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    const mesh = new THREE.Mesh(
+      g,
+      new THREE.ShaderMaterial({
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        uniforms: { map: { value: tex } },
+        vertexShader: /* glsl */ `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+        fragmentShader: /* glsl */ `
+          uniform sampler2D map; varying vec2 vUv;
+          void main() {
+            vec3 c = texture2D(map, vUv).rgb;
+            c = mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); // sRGB → linear
+            gl_FragColor = vec4(c, 1.0);
+            #include <colorspace_fragment>
+          }`,
+      }),
+    );
+    mesh.renderOrder = -1;
+    group.add(mesh);
+  }
+  group.scale.setScalar(50000);
+  return group;
+}
+
 // Source → three.js basis (x, y, z) → (x, z, -y), used to move prop transforms into three space.
 const SOURCE_TO_THREE = new THREE.Matrix4().set(1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1);
 const THREE_TO_SOURCE = SOURCE_TO_THREE.clone().transpose();
@@ -221,6 +278,13 @@ export function createRenderer(canvas: HTMLCanvasElement) {
   sky.scale.setScalar(50000);
   sky.renderOrder = -1;
   scene.add(sky);
+  let skybox: THREE.Group | null = null;
+  const skyUniforms = (sky.material as THREE.ShaderMaterial).uniforms;
+  const setSkyColors = (c: { horizon: THREE.Color; zenith: THREE.Color; ground: THREE.Color }) => {
+    skyUniforms.horizon.value = c.horizon;
+    skyUniforms.zenith.value = c.zenith;
+    skyUniforms.ground.value = c.ground;
+  };
   const camera = new THREE.PerspectiveCamera(74, 1, 4, 120000);
   camera.rotation.order = 'YXZ';
   const rampMat = surfaceMaterial(sandstone(), 256);
@@ -246,7 +310,7 @@ export function createRenderer(canvas: HTMLCanvasElement) {
   resize();
 
   return {
-    setMap(map: { brushes: Brush[]; mesh?: BspMap['mesh']; pak?: BspMap['pak']; props?: BspMap['props']; lightmap?: BspMap['lightmap'] }) {
+    setMap(map: { brushes: Brush[]; mesh?: BspMap['mesh']; pak?: BspMap['pak']; props?: BspMap['props']; lightmap?: BspMap['lightmap']; skyName?: string; fog?: BspMap['fog'] }) {
       const geometries = new Set<THREE.BufferGeometry>();
       world.traverse((o) => o instanceof THREE.Mesh && geometries.add(o.geometry));
       geometries.forEach((g) => g.dispose());
@@ -255,6 +319,13 @@ export function createRenderer(canvas: HTMLCanvasElement) {
       lightmap?.dispose();
       lightmap = null;
       world.clear();
+      if (skybox) {
+        skybox.traverse((o) => o instanceof THREE.Mesh && (o.material.uniforms.map.value.dispose(), o.geometry.dispose(), o.material.dispose()));
+        scene.remove(skybox);
+        skybox = null;
+      }
+      sky.visible = true;
+      setSkyColors({ horizon: HORIZON, zenith: ZENITH, ground: GROUND }); // built-in maps keep the desert sky
       if (map.mesh) {
         // The map's own textures where packed and decodable, desert fallback elsewhere.
         if (map.lightmap) {
@@ -266,7 +337,16 @@ export function createRenderer(canvas: HTMLCanvasElement) {
         }
         bspMat.uniforms.exposure.value = map.lightmap?.exposure ?? 1;
         bspMat.uniforms.lightmap.value = lightmap;
-        materials = createMaterialSource(map.pak ?? new Map(), s3tc, SUN, HORIZON, lightmap);
+        materials = createMaterialSource(map.pak ?? new Map(), s3tc, SUN, mapFog, lightmap);
+        const f = map.fog;
+        if (f) mapFog.fogColor.value.setRGB(f.color[0], f.color[1], f.color[2], THREE.SRGBColorSpace);
+        mapFog.fogStart.value = f?.start ?? 0;
+        mapFog.fogEnd.value = f?.end ?? 1;
+        mapFog.fogMax.value = f?.max ?? 0;
+        skybox = map.skyName ? skyboxGroup(map.skyName, map.pak ?? new Map(), s3tc) : null;
+        if (skybox) scene.add(skybox);
+        sky.visible = !skybox;
+        setSkyColors(NEUTRAL);
         const src = materials;
         world.add(new THREE.Mesh(bspGeometry(map.mesh), map.mesh.groups.map((g) => src.get([g.texture], true) ?? bspMat)));
         for (const p of propMeshes(map.props ?? [], map.pak ?? new Map(), (c) => src.get(c, false) ?? floorMat)) world.add(p);
@@ -282,6 +362,7 @@ export function createRenderer(canvas: HTMLCanvasElement) {
     draw(eye: Vec3, yaw: number, pitch: number, pose: Pose) {
       camera.position.copy(toThree(eye));
       sky.position.copy(camera.position);
+      skybox?.position.copy(camera.position);
       camera.rotation.y = (yaw - 90) * DEG; // Source yaw 0 = +X; three's camera faces -Z
       camera.rotation.x = -pitch * DEG; // Source positive pitch looks down
       renderer.clear();
