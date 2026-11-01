@@ -193,9 +193,11 @@ function runCommand(name: string, args: string[]) {
       if (!id) return surf({ text: args[0] ? `No map matching "${args.join(' ')}". Open the menu (Esc) to see them all.` : 'Usage: !map <name>, e.g. !map beginner', tone: 'bad' });
       return hud.apply({ map: id });
     }
+    case 'setgoal':
+      return setGoal(surfLine);
     case 'help': case 'commands':
       surf({ text: 'Commands: !r restart, !pb your best, !cp save a checkpoint, !tele go back to it (practice),' });
-      return surf({ text: '!ghost on or off, !map <name> change map, !game cs16 or csgo switch game.' });
+      return surf({ text: '!ghost on or off, !map <name> change map, !game cs16 or csgo, !setgoal mark the finish.' });
     default:
       return surf({ text: `Unknown command !${name}. Type !help for the list.`, tone: 'bad' });
   }
@@ -259,6 +261,7 @@ con.command('noclip', 'Fly through walls', (_, p) => {
   if (!noclip) (prev = cur = { ...cur, vel: vec() }), (simState = newTickState());
   p(`noclip ${noclip ? 'ON' : 'OFF'}`);
 });
+con.command('setgoal', 'Set the finish here (maps without one)', (_, p) => setGoal(p));
 con.command('saveloc', 'Save a checkpoint', () => saveCheckpoint());
 con.command('teleport', 'Go to your checkpoint', () => teleportCheckpoint());
 con.command('say', 'Chat: say <text>', (a) => a.length && onSay(a.join(' ')));
@@ -356,6 +359,17 @@ con.command('bindlist', 'List your binds', (_, p) => {
 });
 conPrint('Type help for every command, or try: kill, retry, map, bind f "kill", sv_airaccelerate.', 'dim');
 
+// Maps whose files mark no finish: the player marks it where they stand (saved per map).
+function setGoal(print: Print) {
+  if (!map.mesh) return print('Built-in maps have their own finish.', 'error');
+  if ((map as { goalFromMap?: boolean }).goalFromMap) return print('This map has its own finish.', 'error');
+  map.endZone = [goalBox(cur.pos)];
+  saveGoal(map.id, cur.pos);
+  hud.flash('Finish set here');
+  print('Finish set here. Reach it to stop the timer.');
+}
+const surfLine: Print = (text, tone) => surf({ text, tone: tone === 'error' ? 'bad' : undefined });
+
 function refreshRecords() {
   const prefix = `${settings.game}:`;
   const rows = Object.entries(records)
@@ -413,7 +427,7 @@ async function loadBsp(read: () => Promise<ArrayBuffer>, name: string, stock?: M
     await nextFrame();
     announceMap();
     refreshRecords();
-    const goal = m.goalFromMap ? 'goal found in map' : m.endZone ? 'using your saved goal' : 'no goal in map — press F at the finish to set one';
+    const goal = m.goalFromMap ? 'goal found in map' : m.endZone ? 'using your saved goal' : 'no finish in map: type setgoal in the console (or !setgoal in chat) at the finish';
     // Texture report so a missing-texture problem shows what happened (decode path, GPU support).
     const texNote = tex ? ` Textures: ${tex.gpu + tex.cpu} loaded${tex.cpu ? ` (${tex.cpu} decoded on CPU: no GPU texture compression)` : ''}, ${tex.missing} missing${tex.missing && !stock ? ' (stock CS:GO: run npm run import-maps with CS:GO legacy installed)' : ''}.` : '';
     hud.setStatus(`Loaded ${m.brushes.length} brushes, ${m.teleports.length} teleports, ${m.pushes.length} boosters; ${goal}.${texNote}`);
@@ -547,12 +561,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Digit1') saveCheckpoint();
   if (e.code === 'Digit2') teleportCheckpoint();
   if (e.code === 'KeyR') respawn();
-  // Imported maps without a goal trigger: mark the finish where you stand.
-  if (e.code === 'KeyF' && map.mesh && !(map as { goalFromMap?: boolean }).goalFromMap) {
-    map.endZone = [goalBox(cur.pos)];
-    saveGoal(map.id, cur.pos);
-    hud.flash('Goal set here');
-  } else if (e.code === 'KeyF') renderer.inspect(); // CS's inspect key
+  if (e.code === 'KeyF') renderer.inspect(); // CS's inspect key
 });
 // Knife attacks: left click slashes, right click stabs; holding keeps attacking at CS's rate.
 const held = new Set<number>();
@@ -663,3 +672,4 @@ function frame(now: number) {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
+

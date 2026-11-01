@@ -1,7 +1,7 @@
 // Source engine BSP (v19–21, CS:GO/CS:S era) reader: collision brushes, visible faces, entities.
 // The file is untrusted user input: every offset is bounds-checked by DataView, and failures throw clear errors.
 import { Vec3, vec, add, dot, scale, angleVectors } from './math';
-import type { Brush, Plane } from './brush';
+import { makeBox, Brush, Plane } from './brush';
 import { readZip } from './pak';
 
 // landmark: arrive at the same offset from dest as from the landmark, keeping angles and velocity.
@@ -175,11 +175,27 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
     .filter((t) => t.brushes.length);
 
   // Surf timers keep zones on the server; some maps still ship triggers named like zones.
+  const SIDE = /stage|bonus|bns|^b\d|_b\d/i; // stage and bonus zones aren't the map's own start or finish
   const zone = (re: RegExp, timerClass: string) => {
     const e =
       entities.find((x) => x.classname === timerClass) ??
-      entities.find((x) => x.classname?.startsWith('trigger_') && re.test(x.targetname ?? '') && !/stage|bonus|bns/i.test(x.targetname ?? ''));
+      entities.find((x) => x.classname?.startsWith('trigger_') && re.test(x.targetname ?? '') && !SIDE.test(x.targetname ?? ''));
     const bs = e ? modelOf(e) : [];
+    return bs.length ? bs : null;
+  };
+  // No finish trigger: the map's own markers. A teleport into a destination named "end" is the way into the
+  // end room, so arriving there finishes; otherwise the end of the last stage.
+  const endZone = () => {
+    const found = zone(/end|finish/i, 'trigger_momentum_timer_stop');
+    if (found) return found;
+    const endDest = entities.find((e) => e.classname === 'info_teleport_destination' && (/^end/i.test(e.targetname ?? '') || /^map_?end$/i.test(e.targetname ?? '')) && !SIDE.test(e.targetname ?? '') && teleports.some((t) => t.dest.x === parseVec(e.origin).x && t.dest.y === parseVec(e.origin).y));
+    if (endDest) {
+      const p = parseVec(endDest.origin);
+      return [makeBox(add(p, vec(-64, -64, -16)), add(p, vec(64, 64, 128)))];
+    }
+    const stageEnd = (e: Entity) => Number(/stage_?(\d+)_?end/i.exec(e.targetname ?? '')?.[1] ?? -1);
+    const last = entities.filter((e) => e.classname?.startsWith('trigger_') && stageEnd(e) >= 0).sort((a, b) => stageEnd(b) - stageEnd(a))[0];
+    const bs = last ? modelOf(last) : [];
     return bs.length ? bs : null;
   };
 
@@ -206,7 +222,7 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
       .map((e) => ({ brushes: modelOf(e), damage: e.damage === undefined ? 10 : Number(e.damage) || 0 }))
       .filter((h) => h.brushes.length),
     startZone: zone(/start|begin/i, 'trigger_momentum_timer_start'),
-    endZone: zone(/end|finish/i, 'trigger_momentum_timer_stop'),
+    endZone: endZone(),
     killZ: models[0].minZ - 1000,
     skyName: entities.find((e) => e.classname === 'worldspawn')?.skyname ?? '',
     fog: (() => {

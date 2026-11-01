@@ -130,7 +130,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
                 <tr><td>Slash</td><td>Left click</td></tr>
                 <tr><td>Stab</td><td>Right click</td></tr>
                 <tr class="cs2Only"><td>Inspect knife</td><td>F</td></tr>
-                <tr><td>Mark the finish (maps without one)</td><td>F</td></tr>
+                <tr><td>Mark the finish (maps without one)</td><td>setgoal in the console</td></tr>
                 <tr><td>Restart run</td><td>R</td></tr>
                 <tr><td>Save checkpoint</td><td>1</td></tr>
                 <tr><td>Teleport to checkpoint (practice)</td><td>2</td></tr>

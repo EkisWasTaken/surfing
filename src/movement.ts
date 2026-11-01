@@ -25,7 +25,8 @@ export function embedded(pos: Vec3, ducked: boolean, brushes: Brush[]): boolean 
 }
 
 // Spawns and teleport destinations often rest exactly on a floor (or touch a ceiling). A player starting in
-// contact can't move, so find the nearest clear spot: up first (Source spawns players 1u above the spot), then down.
+// contact can't move, so find the nearest clear spot: up first (Source spawns players 1u above the spot), then down,
+// then sideways like CS's stuck check (a destination flush against a full-height wall froze you mid-air).
 export function unstick(pos: Vec3, brushes: Brush[]): Vec3 {
   const { mins, maxs } = config.hullStand;
   const clear = (p: Vec3) => !trace(p, p, mins, maxs, brushes).startSolid;
@@ -33,6 +34,11 @@ export function unstick(pos: Vec3, brushes: Brush[]): Vec3 {
   for (const dir of [1, -1])
     for (let dz = 1; dz <= 72; dz++) {
       const p = add(pos, vec(0, 0, dir * dz));
+      if (clear(p)) return p;
+    }
+  for (let r = 1; r <= 32; r *= 2)
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+      const p = add(pos, vec(dx * r, dy * r, 0));
       if (clear(p)) return p;
     }
   return pos; // nothing clear nearby: leave it as the map placed it

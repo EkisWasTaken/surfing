@@ -104,6 +104,12 @@ describe('unstick', () => {
     expect(p.z).toBeGreaterThanOrEqual(0);
     expect(p.z).toBeLessThanOrEqual(4);
   });
+  it('slides a point flush against a full-height wall out sideways', () => {
+    const wall = makeBox(vec(16, -200, -200), vec(48, 200, 400)); // the hull's +x face touches it exactly
+    const p = unstick(vec(0, 0, 50), [wall]);
+    expect(p.x).toBeLessThan(0);
+    expect(p.z).toBe(50);
+  });
   it('leaves a free point alone', () => {
     expect(unstick(vec(0, 0, 10), [floor])).toEqual(vec(0, 0, 10));
   });
