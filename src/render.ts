@@ -265,9 +265,10 @@ export function createRenderer(canvas: HTMLCanvasElement) {
         const src = materials;
         world.add(new THREE.Mesh(bspGeometry(map.mesh), map.mesh.groups.map((g) => src.get([g.texture], true) ?? bspMat)));
         for (const p of propMeshes(map.props ?? [], map.pak ?? new Map(), (c) => src.get(c, false) ?? floorMat)) world.add(p);
-        return;
+        return { ...src.stats(), s3tc };
       }
       for (const b of map.brushes) world.add(new THREE.Mesh(b.kind === 'ramp' ? rampGeometry(b) : boxGeometry(b), b.kind === 'ramp' ? rampMat : floorMat));
+      return null;
     },
     setFov(fov: number) {
       hfov = fov;

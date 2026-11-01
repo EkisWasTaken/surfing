@@ -135,3 +135,27 @@ describe('resolveMaterial', () => {
     expect(resolveMaterial('dev/dev_measuregeneric01', pak)).toBeNull();
   });
 });
+
+import { decodeDxt } from '../src/vtf';
+
+describe('decodeDxt (CPU fallback when the GPU lacks S3TC)', () => {
+  const block = (bytes: number[]) => new Uint8Array(bytes);
+  it('decodes a DXT1 block: color0 = pure red (565), all indices 0', () => {
+    // color0 = 0xF800 (red), color1 = 0x001F (blue), indices = 0
+    const rgba = decodeDxt({ width: 4, height: 4, format: 'dxt1', mips: [{ width: 4, height: 4, data: block([0x00, 0xf8, 0x1f, 0x00, 0, 0, 0, 0]) }] });
+    expect(Array.from(rgba.slice(0, 4))).toEqual([255, 0, 0, 255]);
+    expect(Array.from(rgba.slice(60, 64))).toEqual([255, 0, 0, 255]);
+  });
+  it('uses index 1 for color1 and interpolates index 2 at 2/3 + 1/3', () => {
+    // indices row 0: pixel0=1, pixel1=2 → bits 0b...1001 = 0x09
+    const rgba = decodeDxt({ width: 4, height: 4, format: 'dxt1', mips: [{ width: 4, height: 4, data: block([0x00, 0xf8, 0x1f, 0x00, 0x09, 0, 0, 0]) }] });
+    expect(Array.from(rgba.slice(0, 4))).toEqual([0, 0, 255, 255]);
+    expect(Array.from(rgba.slice(4, 8))).toEqual([170, 0, 85, 255]);
+  });
+  it('decodes DXT5 alpha', () => {
+    // alpha0 = 255, alpha1 = 0, alpha indices all 1 → alpha 0; then a red DXT1 color block
+    const alphaIdx = [0x49, 0x92, 0x24, 0x49, 0x92, 0x24]; // every 3-bit index = 1
+    const rgba = decodeDxt({ width: 4, height: 4, format: 'dxt5', mips: [{ width: 4, height: 4, data: block([255, 0, ...alphaIdx, 0x00, 0xf8, 0x1f, 0x00, 0, 0, 0, 0]) }] });
+    expect(Array.from(rgba.slice(0, 4))).toEqual([255, 0, 0, 0]);
+  });
+});

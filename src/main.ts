@@ -47,9 +47,10 @@ function useMap(m: MapDef) {
   map = m;
   grid = createGrid(m.brushes);
   m.spawn = unstick(m.spawn, m.brushes);
-  renderer.setMap(m);
+  const textures = renderer.setMap(m);
   best = loadBest(m.id);
   respawn();
+  return textures;
 }
 useMap(map);
 
@@ -84,9 +85,11 @@ async function loadBsp(read: () => Promise<ArrayBuffer>, name: string) {
     hud.addMap(m);
     settings = { ...settings, map: m.id };
     saveSettings(settings);
-    useMap(m);
+    const tex = useMap(m);
     const goal = m.goalFromMap ? 'goal found in map' : m.endZone ? 'using your saved goal' : 'no goal in map — press F at the finish to set one';
-    hud.setStatus(`Loaded ${m.brushes.length} brushes, ${m.teleports.length} teleports, ${m.pushes.length} boosters; ${goal}.`);
+    // Texture report so a missing-texture problem shows what happened (decode path, GPU support).
+    const texNote = tex ? ` Textures: ${tex.gpu + tex.cpu} loaded${tex.cpu ? ` (${tex.cpu} decoded on CPU: no GPU texture compression)` : ''}, ${tex.missing} not in map (stock CS:GO).` : '';
+    hud.setStatus(`Loaded ${m.brushes.length} brushes, ${m.teleports.length} teleports, ${m.pushes.length} boosters; ${goal}.${texNote}`);
   } catch (e) {
     hud.setStatus(e instanceof Error ? e.message : String(e), true);
   }

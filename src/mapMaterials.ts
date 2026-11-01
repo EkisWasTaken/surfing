@@ -1,7 +1,7 @@
 // three.js materials for an imported map's own textures (decoded from its pakfile).
 import * as THREE from 'three';
 import type { Vtf } from './vtf';
-import { parseVtf } from './vtf';
+import { parseVtf, decodeDxt } from './vtf';
 import { resolveMaterial } from './materials';
 
 const S3TC: Record<string, THREE.CompressedPixelFormat> = {
@@ -11,22 +11,22 @@ const S3TC: Record<string, THREE.CompressedPixelFormat> = {
   dxt5: THREE.RGBA_S3TC_DXT5_Format,
 };
 
-function toTexture(v: Vtf, s3tc: boolean): THREE.Texture | null {
+// Textures are uploaded as raw (linear-format) data and the shader applies the sRGB curve itself, so nothing
+// depends on WEBGL_compressed_texture_s3tc_srgb. Without S3TC at all (e.g. software rendering), DXT is decoded on the CPU.
+function toTexture(v: Vtf, s3tc: boolean): { texture: THREE.Texture; cpu: boolean } {
   let t: THREE.Texture;
-  if (v.format === 'rgba') {
-    t = new THREE.DataTexture(v.mips[0].data, v.width, v.height, THREE.RGBAFormat);
+  const gpu = v.format !== 'rgba' && s3tc && !(v.width % 4) && !(v.height % 4);
+  if (gpu) t = new THREE.CompressedTexture(v.mips as unknown as ImageData[], v.width, v.height, S3TC[v.format]);
+  else {
+    t = new THREE.DataTexture(v.format === 'rgba' ? v.mips[0].data : decodeDxt(v), v.mips[0].width, v.mips[0].height, THREE.RGBAFormat);
     t.generateMipmaps = true;
-  } else {
-    // WebGL needs block-aligned DXT dimensions; skip odd ones rather than render garbage.
-    if (!s3tc || v.width % 4 || v.height % 4) return null;
-    t = new THREE.CompressedTexture(v.mips as unknown as ImageData[], v.width, v.height, S3TC[v.format]);
   }
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.colorSpace = THREE.SRGBColorSpace;
+  t.colorSpace = THREE.NoColorSpace;
   t.minFilter = THREE.LinearMipmapLinearFilter;
   t.anisotropy = 8;
   t.needsUpdate = true;
-  return t;
+  return { texture: t, cpu: !gpu && v.format !== 'rgba' };
 }
 
 // lightmap: the map's baked light atlas (world faces, which carry an lmUv attribute); null for props.
@@ -61,6 +61,7 @@ function texturedMaterial(map: THREE.Texture, alphatest: boolean, translucent: b
       #endif
       void main() {
         vec4 tex = texture2D(map, vUv);
+        tex.rgb = mix(tex.rgb / 12.92, pow((tex.rgb + 0.055) / 1.055, vec3(2.4)), step(0.04045, tex.rgb)); // sRGB → linear
         #ifdef ALPHATEST
           if (tex.a < 0.5) discard;
         #endif
@@ -83,7 +84,13 @@ function texturedMaterial(map: THREE.Texture, alphatest: boolean, translucent: b
 // Builds materials from a map's pakfile, caching by resolved name so props sharing a texture share a material.
 export function createMaterialSource(pak: Map<string, Uint8Array>, s3tc: boolean, sun: THREE.Vector3, haze: THREE.Color, lightmap: THREE.Texture | null) {
   const cache = new Map<string, THREE.Material | null>();
+  const stats = { gpu: 0, cpu: 0, missing: 0 };
   const build = (name: string, lit: boolean): THREE.Material | null => {
+    const mat = make(name, lit);
+    if (!mat) stats.missing++;
+    return mat;
+  };
+  const make = (name: string, lit: boolean): THREE.Material | null => {
     const lm = lit ? lightmap : null;
     const m = resolveMaterial(name, pak);
     if (!m) return null;
@@ -91,13 +98,15 @@ export function createMaterialSource(pak: Map<string, Uint8Array>, s3tc: boolean
       // Texture-less tinted material: a 1×1 texture of its color.
       const c = m.color!.map((v) => Math.round(v * 255));
       const t = new THREE.DataTexture(new Uint8Array([c[0], c[1], c[2], 255]), 1, 1, THREE.RGBAFormat);
-      t.colorSpace = THREE.SRGBColorSpace;
       t.needsUpdate = true;
+      stats.gpu++;
       return texturedMaterial(t, false, false, sun, haze, lm);
     }
     const v = parseVtf(m.vtf);
-    const t = v && toTexture(v, s3tc);
-    return t ? texturedMaterial(t, m.alphatest, m.translucent, sun, haze, lm) : null;
+    if (!v) return null;
+    const { texture, cpu } = toTexture(v, s3tc);
+    stats[cpu ? 'cpu' : 'gpu']++;
+    return texturedMaterial(texture, m.alphatest, m.translucent, sun, haze, lm);
   };
   return {
     // First candidate path that resolves wins (models list one per cdmaterials dir).
@@ -111,6 +120,8 @@ export function createMaterialSource(pak: Map<string, Uint8Array>, s3tc: boolean
       }
       return null;
     },
+    // Distinct textures built (world and props counted separately): on the GPU, decoded on the CPU, or not found.
+    stats: () => ({ ...stats }),
     dispose() {
       for (const m of cache.values()) {
         if (!m) continue;
