@@ -147,3 +147,48 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #2a2f25; }
   .hudItem svg { width: 22px; height: 22px; }
   .hudbar { padding: 0 12px 12px; }
 }
+
+/* ---------- Chat (CS 1.6 say text: green tag, CT-blue name, yellow text) ---------- */
+#hud { --chat-text: #f2d37a; --chat-tag: #5fd83f; --chat-name: #99ccff; --chat-good: #8cf06a; --chat-bad: #ff6b5a; }
+#hud[data-game="csgo"] { --chat-text: #e6e8ec; --chat-tag: #8fd14f; --chat-name: #9cc6ff; --chat-good: #9be27a; --chat-bad: #ff8a7a; }
+.chat { position: absolute; left: 28px; bottom: 76px; width: min(620px, calc(100% - 56px)); display: flex; flex-direction: column; gap: 2px; }
+.chat p { margin: 0; font: 700 14px/1.35 var(--font-ui); color: var(--chat-text); text-shadow: 1px 1px 0 #000, 0 0 4px #000a; animation: chat-life var(--life, 10s) linear forwards; }
+.chat .tag { color: var(--chat-tag); }
+.chat .name { color: var(--chat-name); }
+.chat .good { color: var(--chat-good); }
+.chat .bad { color: var(--chat-bad); }
+@keyframes chat-life { 0%, 85% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .chat p { animation: none; } }
+
+/* ---------- Loading (CS 1.6's connection box with a segmented progress bar) ---------- */
+.loading { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgb(14 17 12 / 0.7); pointer-events: auto; }
+.loadingWindow { width: min(400px, 100%); }
+.loadingGame { margin: 0; font: 700 14px/1.2 var(--font-ui); color: var(--text); }
+.loadingBody { padding: 4px 16px 16px; display: grid; gap: 8px; }
+.loadingMap { margin: 0; color: var(--text); }
+.loadingStep { margin: 0; color: var(--dim); font-size: 12px; min-height: 1.4em; }
+.progress { height: 18px; padding: 2px; background: var(--well); border: 1px solid; border-color: var(--dark) var(--light) var(--light) var(--dark); }
+.progressFill { height: 100%; width: 0; background: repeating-linear-gradient(90deg, var(--select) 0 9px, transparent 9px 12px); transition: width 0.15s linear; }
+/* CS:GO: the map name large in the corner over a thin bar, no window. */
+#hud[data-game="csgo"] .loading { align-items: flex-end; justify-content: flex-start; padding: 40px; background: linear-gradient(0deg, rgb(10 12 16 / 0.92), rgb(10 12 16 / 0.6)); }
+#hud[data-game="csgo"] .loadingWindow { background: none; border: 0; box-shadow: none; width: min(520px, 100%); }
+#hud[data-game="csgo"] .loadingWindow .titlebar { padding: 0 0 4px; }
+#hud[data-game="csgo"] .loadingGame { font-weight: 400; color: var(--dim); }
+#hud[data-game="csgo"] .loadingBody { padding: 0; }
+#hud[data-game="csgo"] .loadingMap { font-size: 30px; font-weight: 700; }
+#hud[data-game="csgo"] .progress { height: 4px; padding: 0; border: 0; background: rgb(255 255 255 / 0.15); }
+#hud[data-game="csgo"] .progressFill { background: var(--select); }
+@media (prefers-reduced-motion: reduce) { .progressFill { transition: none; } }
+
+/* ---------- Records ---------- */
+.recordsTitle { margin: 0; font-weight: 700; color: var(--text); }
+.records td:last-child, .records td:nth-child(2), .records td:nth-child(3) { width: auto; white-space: nowrap; }
+.records td:nth-child(2) { font-variant-numeric: tabular-nums; color: var(--text); }
+.records tr.current td { background: color-mix(in srgb, var(--well) 70%, var(--select)); }
+.recent { display: grid; gap: 4px; }
+.recentTitle { margin: 4px 0 0; color: var(--dim); font-size: 12px; }
+.recentList { margin: 0; padding-left: 2.2em; font-variant-numeric: tabular-nums; }
+.options input[type="text"] {
+  font: inherit; color: var(--text); background: var(--well); padding: 4px 6px; width: 100%; box-sizing: border-box;
+  border: 1px solid; border-color: var(--dark) var(--light) var(--light) var(--dark); border-radius: var(--radius);
+}

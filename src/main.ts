@@ -16,7 +16,8 @@ import { newPose, stepPose } from './viewmodelPose';
 import { createInput } from './input';
 import { createRenderer } from './render';
 import { createHud } from './hud';
-import { newRun, tickRun, formatTime, loadBest, saveBest, Run } from './timer';
+import { newRun, tickRun, formatTime, Run } from './timer';
+import { loadRecords, saveRecords, recordFinish, recordKey, FinishResult } from './records';
 import { Settings, loadSettings, saveSettings, applySettings } from './settings';
 
 const canvas = document.querySelector<HTMLCanvasElement>('#game')!;
@@ -35,7 +36,8 @@ let acc = createAccumulator(1 / config.tickrate);
 let grid = createGrid(map.brushes);
 let prev: Player, cur: Player;
 let run: Run = newRun();
-let best = loadBest(map.id);
+let records = loadRecords();
+const best = () => records[recordKey(settings.game, map.id)]?.best ?? null; // per game: CS:GO and 1.6 times differ
 let simState = newTickState(); // once-pushes, health and hurt timing carried between ticks
 let pose = newPose(); // knife bob/sway
 let lastFrameView = { yaw: 0, pitch: 0 };
@@ -54,7 +56,6 @@ function useMap(m: MapDef) {
   grid = createGrid(m.brushes);
   m.spawn = unstick(m.spawn, m.brushes);
   const textures = renderer.setMap(m);
-  best = loadBest(m.id);
   respawn();
   return textures;
 }
@@ -77,22 +78,87 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
     if (tickChanged) acc = createAccumulator(1 / config.tickrate);
     if (gameChanged) renderer.setGame(next.game);
     if (gameChanged && !mapChanged) respawn(); // hulls and rules differ: start the run over under the new ones
+    if (gameChanged && !mapChanged) (announceMap(), refreshRecords());
     if (knifeChanged) loadKnife(next.knife);
     else if (finishChanged) applyFinish();
     if (!mapChanged) return;
     const known = maps.find((m) => m.id === next.map);
-    if (known) useMap(known);
+    if (known) (useMap(known), announceMap(), refreshRecords());
     else if (next.map.startsWith('bsp:')) loadFolderMap(next.map.slice(4));
-    else useMap(maps[0]);
+    else (useMap(maps[0]), announceMap(), refreshRecords());
   },
-  onLoadFile: async (file: File) => loadBsp(() => file.arrayBuffer(), file.name),
+  onLoadFile: async (file: File) => {
+    showLoading(file.name, 'Reading map file…', 0.3);
+    return loadBsp(() => file.arrayBuffer(), file.name);
+  },
 });
+
+// Chat and records: CS server-style lines for map changes and finishes.
+const gameName = () => (settings.game === 'cs16' ? 'CS 1.6' : 'CS:GO');
+const mapShort = (m: MapDef) => (m.id.startsWith('bsp:') ? m.id.slice(4).replace(/\.bsp$/i, '') : m.name);
+const player = () => settings.name.trim() || 'Player';
+const signed = (d: number) => `${d < 0 ? '-' : '+'}${formatTime(Math.abs(d))}`;
+const ordinal = (n: number) => `${n}${n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th'}`;
+function announceMap() {
+  const pb = best();
+  hud.chat([{ text: '[Surf] ', tone: 'tag' }, { text: `Now on ${mapShort(map)} with ${gameName()} movement. ` }, pb === null ? { text: 'No record here yet: leave the start zone to begin.' } : { text: `Your best: ${formatTime(pb)}`, tone: 'good' }]);
+}
+function announceFinish(r: FinishResult) {
+  const t = formatTime(run.time), head = [{ text: '[Surf] ', tone: 'tag' as const }, { text: player(), tone: 'name' as const }];
+  if (r.kind === 'first') {
+    hud.chat([...head, { text: ` finished ${mapShort(map)} in ${t}. ` }, { text: 'First record on this map!', tone: 'good' }]);
+    hud.flash(`First record: ${t}`);
+  } else if (r.kind === 'pb') {
+    hud.chat([...head, { text: ` broke their record on ${mapShort(map)}: ${t} ` }, { text: `(${signed(r.delta)})`, tone: 'good' }]);
+    hud.flash(`New personal best: ${t}`);
+  } else {
+    const nth = r.record.recent.length >= 3 ? `, your ${ordinal(r.rank)} best of the last ${r.record.recent.length}` : '';
+    hud.chat([...head, { text: ` finished ${mapShort(map)} in ${t} ` }, { text: `(${signed(r.delta)}${nth})`, tone: 'bad' }]);
+    hud.flash(`Finished ${t}`);
+  }
+}
+function refreshRecords() {
+  const prefix = `${settings.game}:`;
+  const rows = Object.entries(records)
+    .filter(([k]) => k.startsWith(prefix))
+    .map(([k, r]) => ({ mapId: k.slice(prefix.length), best: r.best, finishes: r.finishes, bestAt: r.bestAt }))
+    .sort((a, b) => b.bestAt - a.bestAt);
+  hud.setRecords(gameName(), rows, map.id, records[recordKey(settings.game, map.id)]?.recent ?? []);
+}
+refreshRecords();
+if (!wantedMap.startsWith('bsp:')) announceMap(); // folder maps announce once they've loaded
+
+// Loading dialog steps; yields a frame between heavy steps so the bar actually paints.
+const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+const showLoading = (mapName: string, step: string, fraction: number) =>
+  hud.loading({ game: settings.game === 'cs16' ? 'Counter-Strike' : 'Counter-Strike: Global Offensive', map: mapName.replace(/\.bsp$/i, ''), step, fraction });
+async function download(url: string, onProgress: (f: number) => void): Promise<Response & { bytes: ArrayBuffer }> {
+  const res = await fetch(url);
+  const total = Number(res.headers.get('content-length')) || 0;
+  if (!res.ok || !res.body || !total) return Object.assign(res, { bytes: res.ok ? await res.arrayBuffer() : new ArrayBuffer(0) });
+  const reader = res.body.getReader(), parts: Uint8Array[] = [];
+  let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    parts.push(value);
+    got += value.length;
+    onProgress(Math.min(1, got / total));
+  }
+  const bytes = new Uint8Array(got);
+  let at = 0;
+  for (const p of parts) bytes.set(p, at), (at += p.length);
+  return Object.assign(res, { bytes: bytes.buffer });
+}
 
 // stock: stock CS:GO files bundled by import-maps for this map; the map's own packed files win.
 async function loadBsp(read: () => Promise<ArrayBuffer>, name: string, stock?: Map<string, Uint8Array>) {
   hud.setStatus(`Loading ${name}…`);
   try {
-    const bsp = parseBsp(await read(), name);
+    const bytes = await read();
+    showLoading(name, 'Parsing map resources…', 0.7);
+    await nextFrame();
+    const bsp = parseBsp(bytes, name);
     for (const [k, v] of stock ?? []) if (!bsp.pak.has(k)) bsp.pak.set(k, v);
     const m = bspToMap(bsp, name);
     const i = maps.findIndex((x) => x.id === m.id);
@@ -101,27 +167,37 @@ async function loadBsp(read: () => Promise<ArrayBuffer>, name: string, stock?: M
     hud.addMap(m);
     settings = { ...settings, map: m.id };
     saveSettings(settings);
+    showLoading(name, 'Precaching textures and models…', 0.85);
+    await nextFrame();
     const tex = useMap(m);
+    showLoading(name, 'Entering the game…', 1);
+    await nextFrame();
+    announceMap();
+    refreshRecords();
     const goal = m.goalFromMap ? 'goal found in map' : m.endZone ? 'using your saved goal' : 'no goal in map — press F at the finish to set one';
     // Texture report so a missing-texture problem shows what happened (decode path, GPU support).
     const texNote = tex ? ` Textures: ${tex.gpu + tex.cpu} loaded${tex.cpu ? ` (${tex.cpu} decoded on CPU: no GPU texture compression)` : ''}, ${tex.missing} missing${tex.missing && !stock ? ' (stock CS:GO: run npm run import-maps with CS:GO legacy installed)' : ''}.` : '';
     hud.setStatus(`Loaded ${m.brushes.length} brushes, ${m.teleports.length} teleports, ${m.pushes.length} boosters; ${goal}.${texNote}`);
   } catch (e) {
     hud.setStatus(e instanceof Error ? e.message : String(e), true);
+    hud.chat([{ text: '[Surf] ', tone: 'tag' }, { text: `Couldn't load ${name}: ${e instanceof Error ? e.message : e}`, tone: 'bad' }]);
+  } finally {
+    hud.loading(null);
   }
 }
 
 // Maps folder (public/maps, filled by `npm run import-maps`), served by the dev server.
 async function loadFolderMap(file: string) {
-  const zip = await fetch(`/maps/${encodeURIComponent(file.replace(/.bsp$/i, '.stock.zip'))}`).catch(() => null);
+  showLoading(file, 'Retrieving stock textures…', 0);
+  const zip = await download(`/maps/${encodeURIComponent(file.replace(/.bsp$/i, '.stock.zip'))}`, (f) => showLoading(file, 'Retrieving stock textures…', f * 0.2)).catch(() => null);
   // The dev server answers unknown paths with its HTML page, which reads as an empty zip: treat that as no bundle.
-  const files = zip?.ok ? readZip(new Uint8Array(await zip.arrayBuffer())) : new Map<string, Uint8Array>();
+  const files = zip?.ok ? readZip(new Uint8Array(zip.bytes)) : new Map<string, Uint8Array>();
   const stock = files.size ? files : undefined;
   return loadBsp(
     async () => {
-      const res = await fetch(`/maps/${encodeURIComponent(file)}`);
+      const res = await download(`/maps/${encodeURIComponent(file)}`, (f) => showLoading(file, 'Downloading map…', 0.2 + f * 0.45));
       if (!res.ok) throw new Error(`${file} isn't in the maps folder anymore`);
-      return res.arrayBuffer();
+      return res.bytes;
     },
     file,
     stock,
@@ -245,9 +321,11 @@ function tick(cmd: ReturnType<typeof input.cmd>, tickDt: number) {
   const was = run.phase;
   run = tickRun(run, touching(cur, map.startZone), touching(cur, map.endZone), tickDt);
   if (was === 'running' && run.phase === 'finished') {
-    const pb = best === null || run.time < best;
-    if (pb) saveBest(map.id, (best = run.time));
-    hud.flash(`Finished ${formatTime(run.time)}${pb ? ' — new best!' : ''}`);
+    const r = recordFinish(records, settings.game, map.id, run.time, Date.now());
+    records = r.all;
+    saveRecords(records);
+    announceFinish(r);
+    refreshRecords();
   }
 }
 
@@ -276,7 +354,8 @@ function frame(now: number) {
   lastFrameView = { yaw, pitch };
   renderer.draw(add(a, scale(sub(b, a), acc.alpha())), yaw, pitch, pose);
   hud.setSpeed(Math.hypot(cur.vel.x, cur.vel.y));
-  hud.setTimer(formatTime(run.time), best === null ? '' : `PB ${formatTime(best)}`);
+  const pb = best();
+  hud.setTimer(formatTime(run.time), pb === null ? '' : `PB ${formatTime(pb)}`);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

@@ -1,8 +1,8 @@
 import { config, setGameMode, GameMode } from './config';
 
-export type Settings = { game: GameMode; sensitivity: number; fov: number; tickrate: 64 | 128; autobhop: boolean; showSpeed: boolean; map: string; jumpBind: string; knife: string; finish: string; wear: number; seed: number };
+export type Settings = { name: string; game: GameMode; sensitivity: number; fov: number; tickrate: 64 | 128; autobhop: boolean; showSpeed: boolean; map: string; jumpBind: string; knife: string; finish: string; wear: number; seed: number };
 
-export const defaults: Settings = { game: 'csgo', sensitivity: 2, fov: 90, tickrate: 64, autobhop: true, showSpeed: true, map: 'sandbox', jumpBind: 'Space', knife: 'knife_default_ct', finish: '', wear: 0.01, seed: 0 };
+export const defaults: Settings = { name: 'Player', game: 'csgo', sensitivity: 2, fov: 90, tickrate: 64, autobhop: true, showSpeed: true, map: 'sandbox', jumpBind: 'Space', knife: 'knife_default_ct', finish: '', wear: 0.01, seed: 0 };
 
 const KEY = 'surf-settings';
 const num = (v: unknown, min: number, max: number, fallback: number) =>
@@ -17,6 +17,8 @@ export function parseSettings(raw: string | null): Settings {
     if (parsed && typeof parsed === 'object') o = parsed;
   } catch {}
   return {
+    // CS 1.6 caps names at 31 characters; control characters would break the chat line.
+    name: typeof o.name === 'string' && o.name.replace(/[\u0000-\u001f]/g, '').trim() ? o.name.replace(/[\u0000-\u001f]/g, '').trim().slice(0, 31) : defaults.name,
     game: o.game === 'cs16' ? 'cs16' : 'csgo',
     sensitivity: num(o.sensitivity, 0.01, 20, defaults.sensitivity),
     fov: num(o.fov, 60, 130, defaults.fov),

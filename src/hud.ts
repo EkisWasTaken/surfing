@@ -1,4 +1,5 @@
 import type { Settings } from './settings';
+import { formatTime } from './timer';
 import { bindLabel, wheelCode } from './input';
 
 type HudOptions = {
@@ -19,6 +20,7 @@ const TABS = [
   { id: 'map', name: 'Map' },
   { id: 'movement', name: 'Movement' },
   { id: 'knife', name: 'Knife' },
+  { id: 'records', name: 'Records' },
   { id: 'controls', name: 'Controls' },
 ];
 
@@ -30,6 +32,17 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   root.innerHTML = `
     <div class="flash" role="status" hidden></div>
     <div class="crosshair" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+    <div class="chat" aria-live="polite"></div>
+    <div class="loading" role="dialog" aria-labelledby="loadingTitle" hidden>
+      <section class="window loadingWindow">
+        <header class="titlebar"><h2 id="loadingTitle" class="loadingGame"></h2></header>
+        <div class="loadingBody">
+          <p class="loadingMap"></p>
+          <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div class="progressFill"></div></div>
+          <p class="loadingStep"></p>
+        </div>
+      </section>
+    </div>
     <div class="hudbar">
       <div class="hudItem speed" aria-label="Speed">${ICON.speed}<span class="speedVal">0</span><small>u/s</small></div>
       <div class="hudItem timer" aria-label="Run time">${ICON.clock}<span class="time">0:00.000</span></div>
@@ -43,6 +56,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
         </div>
         <form class="options">
           <div class="sheet" role="tabpanel" id="sheet-map" aria-labelledby="tab-map">
+            <label class="row"><span>Your name</span><input name="name" type="text" maxlength="31" autocomplete="nickname" spellcheck="false" /></label>
             <label class="row"><span>Map</span>
               <select name="map">${opts.maps.map((m) => `<option value="${esc(m.id)}">${esc(m.name)}</option>`).join('')}</select>
             </label>
@@ -78,6 +92,18 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
               <label class="row"><span>Pattern seed</span><input name="seed" type="number" min="0" max="1000" step="1" /></label>
             </div>
           </div>
+          <div class="sheet" role="tabpanel" id="sheet-records" aria-labelledby="tab-records" hidden>
+            <p class="recordsTitle"></p>
+            <p class="note noRecords">Finish a map to set your first record. Times are kept separately for CS:GO and CS 1.6.</p>
+            <table class="keylist records" hidden>
+              <thead><tr><th scope="col">Map</th><th scope="col">Best</th><th scope="col">Finishes</th><th scope="col">Set on</th></tr></thead>
+              <tbody></tbody>
+            </table>
+            <div class="recent" hidden>
+              <p class="recentTitle"></p>
+              <ol class="recentList"></ol>
+            </div>
+          </div>
           <div class="sheet" role="tabpanel" id="sheet-controls" aria-labelledby="tab-controls" hidden>
             <table class="keylist">
               <thead><tr><th scope="col">Action</th><th scope="col">Key</th></tr></thead>
@@ -107,6 +133,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
 
   el.map.value = cur.map;
   el.sensitivity.value = String(cur.sensitivity);
+  el.name.value = cur.name;
   el.fov.value = String(cur.fov);
   el.fovOut.value = String(cur.fov);
   el.tickrate.value = String(cur.tickrate);
@@ -175,6 +202,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     el.wearOut.value = wearLabel(Number(el.wear.value));
     const sens = parseFloat(el.sensitivity.value), seed = parseInt(el.seed.value, 10);
     change({
+      name: e.target === el.name ? el.name.value : cur.name,
       map: el.map.value,
       sensitivity: Number.isFinite(sens) ? Math.min(20, Math.max(0.01, sens)) : cur.sensitivity,
       fov: Number(el.fov.value),
@@ -218,8 +246,64 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     window.addEventListener('wheel', onWheel, { capture: true, passive: false });
   });
 
+  // Chat: CS 1.6-style lines (tag, name, text), newest at the bottom, each fading out after a while.
+  const chat = $('.chat');
+  const CHAT_LINES = 6, CHAT_SECONDS = 10;
+  // Loading dialog, after CS 1.6's connection progress box.
+  const loading = $('.loading'), progress = $('.progress'), progressFill = $('.progressFill');
+  const day = (at: number) => (at ? new Date(at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : 'before records were kept');
+  const mapLabel = (id: string) => ([...el.map.options].find((o) => o.value === id)?.text ?? id.replace(/^bsp:/, '').replace(/\.bsp$/i, '')).replace(/^CS:GO: /, '');
+
   let flashTimer = 0;
   return {
+    chat(parts: { text: string; tone?: 'tag' | 'name' | 'good' | 'bad' }[]) {
+      const line = document.createElement('p');
+      line.style.setProperty('--life', `${CHAT_SECONDS}s`);
+      for (const p of parts) {
+        const span = document.createElement('span');
+        span.textContent = p.text;
+        if (p.tone) span.className = p.tone;
+        line.append(span);
+      }
+      chat.append(line);
+      while (chat.children.length > CHAT_LINES) chat.firstElementChild!.remove();
+      setTimeout(() => line.remove(), CHAT_SECONDS * 1000);
+    },
+    // null hides the dialog; fraction 0..1 drives the segmented bar.
+    loading(state: { game: string; map: string; step: string; fraction: number } | null) {
+      loading.hidden = !state;
+      if (!state) return;
+      $('.loadingGame').textContent = state.game;
+      $('.loadingMap').textContent = `Loading "${state.map}"`;
+      $('.loadingStep').textContent = state.step;
+      const pct = Math.round(Math.min(1, Math.max(0, state.fraction)) * 100);
+      progress.setAttribute('aria-valuenow', String(pct));
+      progressFill.style.width = `${pct}%`;
+    },
+    // Records for the current game; the current map's last finishes underneath.
+    setRecords(gameName: string, rows: { mapId: string; best: number; finishes: number; bestAt: number }[], currentId: string, recent: { time: number; at: number }[]) {
+      $('.recordsTitle').textContent = `Your ${gameName} records`;
+      $('.noRecords').hidden = rows.length > 0;
+      const table = $('.records');
+      table.hidden = rows.length === 0;
+      table.querySelector('tbody')!.replaceChildren(
+        ...rows.map((r) => {
+          const tr = document.createElement('tr');
+          if (r.mapId === currentId) tr.className = 'current';
+          for (const text of [mapLabel(r.mapId), formatTime(r.best), String(r.finishes), day(r.bestAt)]) tr.insertCell().textContent = text;
+          return tr;
+        }),
+      );
+      $('.recent').hidden = recent.length === 0;
+      $('.recentTitle').textContent = `Last finishes on ${mapLabel(currentId)}`;
+      $('.recentList').replaceChildren(
+        ...recent.map((f) => {
+          const li = document.createElement('li');
+          li.textContent = `${formatTime(f.time)}${f.time === Math.min(...recent.map((x) => x.time)) ? '  (best of these)' : ''}`;
+          return li;
+        }),
+      );
+    },
     setSpeed: (u: number) => (speedVal.textContent = String(Math.round(u))),
     showOverlay: (show: boolean) => (overlay.hidden = !show),
     setTimer(t: string, bestText: string) {
