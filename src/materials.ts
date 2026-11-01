@@ -20,7 +20,10 @@ function color(text: string): number[] | null {
   return [m[2], m[3], m[4]].map((v) => Math.min(1, Number(v) / s));
 }
 
-export function resolveMaterial(name: string, pak: Map<string, Uint8Array>): ResolvedMaterial | null {
+// Anything with get(path): the map's pakfile, or a lookup that also reads stock game archives.
+export type FileSource = { get(path: string): Uint8Array | undefined };
+
+export function resolveMaterial(name: string, pak: FileSource): ResolvedMaterial | null {
   const vmt = (path: string) => {
     const b = pak.get(`materials/${norm(path)}.vmt`);
     return b ? dec.decode(b) : null;

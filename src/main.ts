@@ -5,6 +5,7 @@ import { maps as builtins, findMap } from './maps';
 import type { MapDef } from './maps';
 import { bspToMap, goalBox, saveGoal } from './maps/imported';
 import { parseBsp } from './bsp';
+import { readZip } from './pak';
 import { createGrid } from './grid';
 import { newPlayer, unstick, Player } from './movement';
 import { simTick, touching } from './sim';
@@ -75,10 +76,13 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
   onLoadFile: async (file: File) => loadBsp(() => file.arrayBuffer(), file.name),
 });
 
-async function loadBsp(read: () => Promise<ArrayBuffer>, name: string) {
+// stock: stock CS:GO files bundled by import-maps for this map; the map's own packed files win.
+async function loadBsp(read: () => Promise<ArrayBuffer>, name: string, stock?: Map<string, Uint8Array>) {
   hud.setStatus(`Loading ${name}…`);
   try {
-    const m = bspToMap(parseBsp(await read(), name), name);
+    const bsp = parseBsp(await read(), name);
+    for (const [k, v] of stock ?? []) if (!bsp.pak.has(k)) bsp.pak.set(k, v);
+    const m = bspToMap(bsp, name);
     const i = maps.findIndex((x) => x.id === m.id);
     if (i >= 0) maps[i] = m;
     else maps.push(m);
@@ -88,7 +92,7 @@ async function loadBsp(read: () => Promise<ArrayBuffer>, name: string) {
     const tex = useMap(m);
     const goal = m.goalFromMap ? 'goal found in map' : m.endZone ? 'using your saved goal' : 'no goal in map — press F at the finish to set one';
     // Texture report so a missing-texture problem shows what happened (decode path, GPU support).
-    const texNote = tex ? ` Textures: ${tex.gpu + tex.cpu} loaded${tex.cpu ? ` (${tex.cpu} decoded on CPU: no GPU texture compression)` : ''}, ${tex.missing} not in map (stock CS:GO).` : '';
+    const texNote = tex ? ` Textures: ${tex.gpu + tex.cpu} loaded${tex.cpu ? ` (${tex.cpu} decoded on CPU: no GPU texture compression)` : ''}, ${tex.missing} missing${tex.missing && !stock ? ' (stock CS:GO: run npm run import-maps with CS:GO legacy installed)' : ''}.` : '';
     hud.setStatus(`Loaded ${m.brushes.length} brushes, ${m.teleports.length} teleports, ${m.pushes.length} boosters; ${goal}.${texNote}`);
   } catch (e) {
     hud.setStatus(e instanceof Error ? e.message : String(e), true);
@@ -96,12 +100,21 @@ async function loadBsp(read: () => Promise<ArrayBuffer>, name: string) {
 }
 
 // Maps folder (public/maps, filled by `npm run import-maps`), served by the dev server.
-const loadFolderMap = (file: string) =>
-  loadBsp(async () => {
-    const res = await fetch(`/maps/${encodeURIComponent(file)}`);
-    if (!res.ok) throw new Error(`${file} isn't in the maps folder anymore`);
-    return res.arrayBuffer();
-  }, file);
+async function loadFolderMap(file: string) {
+  const zip = await fetch(`/maps/${encodeURIComponent(file.replace(/.bsp$/i, '.stock.zip'))}`).catch(() => null);
+  // The dev server answers unknown paths with its HTML page, which reads as an empty zip: treat that as no bundle.
+  const files = zip?.ok ? readZip(new Uint8Array(await zip.arrayBuffer())) : new Map<string, Uint8Array>();
+  const stock = files.size ? files : undefined;
+  return loadBsp(
+    async () => {
+      const res = await fetch(`/maps/${encodeURIComponent(file)}`);
+      if (!res.ok) throw new Error(`${file} isn't in the maps folder anymore`);
+      return res.arrayBuffer();
+    },
+    file,
+    stock,
+  );
+}
 
 fetch('/maps/index.json')
   .then((r) => (r.ok ? r.json() : []))
