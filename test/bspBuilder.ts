@@ -9,7 +9,7 @@ export function buildBsp(opts: {
   submodels: BoxSpec[][]; // models 1..n
   // light.size = luxels per axis minus one (Source's LightmapTextureSizeInLuxels); samples are [r, g, b, exp] per luxel.
   // Lightmap axes: s = x/256 + 2, t = y/256 + 2 (so a ±512 face spans luxels 0..4).
-  face?: { verts: number[][]; reflectivity: number[]; name: string; flags: number; normal?: number[]; light?: { size: number[]; samples: number[][] } }[];
+  face?: { verts: number[][]; reflectivity: number[]; name: string; flags: number; normal?: number[]; light?: { size: number[]; samples: number[][] }; model?: number }[]; // faces must be grouped by model, in order
   // Put lighting in the HDR lumps only (53 + face table 58), leaving the LDR face offsets meaningless, as real HDR-only maps do.
   hdrOnly?: boolean;
   lzmaLump?: boolean;
@@ -107,7 +107,7 @@ export function buildBsp(opts: {
     { index: 10, size: 32, count: leafs.length, write: (dv, o, i) => { dv.setInt32(o, 1, true); dv.setUint16(o + 24, leafs[i].first, true); dv.setUint16(o + 26, leafs[i].num, true); } },
     { index: 12, size: 4, count: edges.length, write: (dv, o, i) => { dv.setUint16(o, edges[i][0], true); dv.setUint16(o + 2, edges[i][1], true); } },
     { index: 13, size: 4, count: surfedges.length, write: (dv, o, i) => dv.setInt32(o, surfedges[i], true) },
-    { index: 14, size: 48, count: models.length, write: (dv, o, i) => { dv.setFloat32(o + 8, -100, true); dv.setInt32(o + 36, i, true); dv.setInt32(o + 40, 0, true); dv.setInt32(o + 44, i === 0 ? faceRecs.length : 0, true); } },
+    { index: 14, size: 48, count: models.length, write: (dv, o, i) => { dv.setFloat32(o + 8, -100, true); dv.setInt32(o + 36, i, true); const first = faces.findIndex((f) => (f.model ?? 0) === i); dv.setInt32(o + 40, Math.max(0, first), true); dv.setInt32(o + 44, faces.filter((f) => (f.model ?? 0) === i).length, true); } },
     { index: 17, size: 2, count: leafbrushes.length, write: (dv, o, i) => dv.setUint16(o, leafbrushes[i], true) },
     { index: 18, size: 12, count: brushes.length, write: (dv, o, i) => { dv.setInt32(o, brushes[i].first, true); dv.setInt32(o + 4, brushes[i].num, true); dv.setInt32(o + 8, brushes[i].contents, true); } },
     { index: 19, size: 8, count: sides.length, write: (dv, o, i) => dv.setUint16(o, sides[i], true) },

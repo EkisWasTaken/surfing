@@ -1,10 +1,12 @@
 // Source engine BSP (v19–21, CS:GO/CS:S era) reader: collision brushes, visible faces, entities.
 // The file is untrusted user input: every offset is bounds-checked by DataView, and failures throw clear errors.
-import { Vec3, vec } from './math';
+import { Vec3, vec, add, dot, scale, angleVectors } from './math';
 import type { Brush, Plane } from './brush';
 import { readZip } from './pak';
 
 export type Teleport = { brushes: Brush[]; dest: Vec3; yaw: number };
+// trigger_push: base velocity while inside; `once` pushes a single impulse on entry.
+export type Push = { brushes: Brush[]; vel: Vec3; once: boolean };
 // angles are Source (pitch, yaw, roll) in x, y, z.
 export type StaticProp = { model: string; origin: Vec3; angles: Vec3; skin: number; scale: number };
 export type BspMap = {
@@ -19,6 +21,8 @@ export type BspMap = {
   spawn: Vec3;
   spawnYaw: number;
   teleports: Teleport[];
+  pushes: Push[];
+  hurts: Brush[]; // trigger_hurt volumes: touching one respawns you
   startZone: Brush[] | null;
   endZone: Brush[] | null;
   killZ: number;
@@ -30,6 +34,10 @@ const PLAYER_SOLID = 0x1 | 0x2 | 0x8 | 0x10000 | 0x2000000;
 // sky2d | sky | trigger | nodraw | hint | skip
 const HIDDEN_SURF = 0x2 | 0x4 | 0x40 | 0x80 | 0x100 | 0x200;
 const SURF_NOLIGHT = 0x400;
+// Brush entities that are solid in their starting position (doors/movers are treated as static).
+const SOLID_ENTITIES = /^func_(brush|wall|wall_toggle|breakable|door|door_rotating|movelinear|button)$/;
+// Brush entities that are drawn (includes non-solid decoration like func_illusionary).
+const VISIBLE_ENTITIES = /^func_(brush|wall|wall_toggle|breakable|door|door_rotating|movelinear|button|illusionary|rotating|lod)$/;
 
 // Lightmaps go into 8 bits as sqrt(light / 4): keeps 4× overbright with precision where it matters (darks).
 export const encodeLight = (v: number) => Math.round(Math.sqrt(Math.min(1, Math.max(0, v / 4))) * 255);
@@ -137,11 +145,22 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
   const { ofs: entOfs, len: entLen } = lump(L.ENTITIES);
   const entities = parseEntities(new TextDecoder().decode(new Uint8Array(buffer, entOfs, entLen)));
   const byName = new Map(entities.filter((e) => e.targetname).map((e) => [e.targetname, e]));
-  const modelOf = (e: Entity) => (e.model?.startsWith('*') ? modelBrushes(Number(e.model.slice(1)), null) : []);
+  // Brush entity models are stored relative to the entity's origin key.
+  // shortcut: entity angles are ignored (rotated brush entities are rare on surf maps); apply them if a map needs it.
+  const moved = (b: Brush, o: Vec3): Brush =>
+    o.x || o.y || o.z ? { ...b, planes: b.planes.map((p) => ({ normal: p.normal, dist: p.dist + dot(p.normal, o) })), mins: add(b.mins, o), maxs: add(b.maxs, o) } : b;
+  const modelOf = (e: Entity, mask: number | null = null) =>
+    e.model?.startsWith('*') ? modelBrushes(Number(e.model.slice(1)), mask).map((b) => moved(b, parseVec(e.origin))) : [];
+  const enabled = (e: Entity) => e.StartDisabled !== '1';
+  const solidEntity = (e: Entity) =>
+    SOLID_ENTITIES.test(e.classname ?? '') &&
+    enabled(e) &&
+    !(e.classname === 'func_brush' && e.Solidity === '1') &&
+    !(e.classname === 'func_wall_toggle' && Number(e.spawnflags) & 1);
 
   const spawnEnt = ['info_player_terrorist', 'info_player_counterterrorist', 'info_player_start', 'info_player_teamspawn', 'info_player_deathmatch'].map((c) => entities.find((e) => e.classname === c)).find(Boolean);
   const teleports: Teleport[] = entities
-    .filter((e) => e.classname === 'trigger_teleport' && e.target && byName.has(e.target))
+    .filter((e) => e.classname === 'trigger_teleport' && enabled(e) && e.target && byName.has(e.target))
     .map((e) => {
       const d = byName.get(e.target)!;
       return { brushes: modelOf(e), dest: parseVec(d.origin), yaw: parseVec(d.angles).y };
@@ -149,14 +168,16 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
     .filter((t) => t.brushes.length);
 
   // Surf timers keep zones on the server; some maps still ship triggers named like zones.
-  const zone = (re: RegExp) => {
-    const e = entities.find((x) => x.classname?.startsWith('trigger_') && re.test(x.targetname ?? '') && !/stage|bonus|bns/i.test(x.targetname ?? ''));
+  const zone = (re: RegExp, timerClass: string) => {
+    const e =
+      entities.find((x) => x.classname === timerClass) ??
+      entities.find((x) => x.classname?.startsWith('trigger_') && re.test(x.targetname ?? '') && !/stage|bonus|bns/i.test(x.targetname ?? ''));
     const bs = e ? modelOf(e) : [];
     return bs.length ? bs : null;
   };
 
   return {
-    brushes: modelBrushes(0, PLAYER_SOLID),
+    brushes: [...modelBrushes(0, PLAYER_SOLID), ...entities.filter(solidEntity).flatMap((e) => modelOf(e, PLAYER_SOLID))],
     ...readFaces(),
     props: readProps(),
     pak: (() => {
@@ -166,8 +187,16 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
     spawn: parseVec(spawnEnt?.origin),
     spawnYaw: parseVec(spawnEnt?.angles).y,
     teleports,
-    startZone: zone(/start|begin/i),
-    endZone: zone(/end|finish/i),
+    pushes: entities
+      .filter((e) => e.classname === 'trigger_push' && enabled(e) && (Number(e.spawnflags ?? 1) & 1) !== 0)
+      .map((e) => {
+        const d = parseVec(e.pushdir);
+        return { brushes: modelOf(e), vel: scale(angleVectors(d.y, d.x).forward, Number(e.speed) || 0), once: (Number(e.spawnflags) & 128) !== 0 };
+      })
+      .filter((p) => p.brushes.length),
+    hurts: entities.filter((e) => e.classname === 'trigger_hurt' && enabled(e)).flatMap((e) => modelOf(e)),
+    startZone: zone(/start|begin/i, 'trigger_momentum_timer_start'),
+    endZone: zone(/end|finish/i, 'trigger_momentum_timer_stop'),
     killZ: models[0].minZ - 1000,
   };
 
@@ -240,10 +269,18 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
     const lmT = (o: number) => [f32(o + 48), f32(o + 52), f32(o + 56), f32(o + 60)];
     const lmAxes = records(L.TEXINFO, 72, (o) => ({ s: lmS(o), t: lmT(o) }));
 
-    type Item = { tex: string; poly: number[][]; color: number[]; ti: number; face: number; rect: { x: number; y: number; w: number; h: number } | null };
+    // poly is in model space (texture/lightmap axes are too); offset places brush entities at their origin.
+    type Item = { tex: string; poly: number[][]; offset: Vec3; color: number[]; ti: number; face: number; rect: { x: number; y: number; w: number; h: number } | null };
     const items: Item[] = [];
-    const world = models[0];
-    for (let fi = world.firstface; fi < world.firstface + world.numfaces && fi < faces.length; fi++) {
+    const ranges = [
+      { model: models[0], offset: vec() },
+      ...entities
+        .filter((e) => VISIBLE_ENTITIES.test(e.classname ?? '') && e.model?.startsWith('*'))
+        .map((e) => ({ model: models[Number(e.model.slice(1))], offset: parseVec(e.origin) }))
+        .filter((r) => r.model),
+    ];
+    for (const { model, offset } of ranges)
+    for (let fi = model.firstface; fi < model.firstface + model.numfaces && fi < faces.length; fi++) {
       const f = faces[fi];
       const ti = texinfo[f.texinfo];
       if (!ti || ti.flags & HIDDEN_SURF) continue;
@@ -260,7 +297,7 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
       const lf = lightFaces[fi];
       const w = lf ? lf.lmSize[0] + 1 : 0, h = lf ? lf.lmSize[1] + 1 : 0;
       const hasLight = lf && !(ti.flags & SURF_NOLIGHT) && lf.style0 !== 255 && lf.lightofs >= 0 && w > 0 && h > 0 && w <= 512 && h <= 512 && lf.lightofs + w * h * 4 <= light.len;
-      items.push({ tex, poly, color: td?.color ?? [0.6, 0.6, 0.6], ti: f.texinfo, face: fi, rect: hasLight ? { x: 0, y: 0, w, h } : null });
+      items.push({ tex, poly, offset, color: td?.color ?? [0.6, 0.6, 0.6], ti: f.texinfo, face: fi, rect: hasLight ? { x: 0, y: 0, w, h } : null });
     }
 
     // Shelf-pack every face's luxel rectangle into one atlas; texel (0,0) is reserved white for unlit faces.
@@ -314,7 +351,7 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
         const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = d[0] - a[0], vy = d[1] - a[1], vz = d[2] - a[2];
         const facing = ((uy * vz - uz * vy) * pn.x + (uz * vx - ux * vz) * pn.y + (ux * vy - uy * vx) * pn.z) * sign;
         for (const v of facing >= 0 ? [a, b, d] : [a, d, b]) {
-          bucket.pos.push(...v);
+          bucket.pos.push(v[0] + it.offset.x, v[1] + it.offset.y, v[2] + it.offset.z);
           bucket.col.push(...it.color);
           bucket.uv.push((v[0] * ti.s[0] + v[1] * ti.s[1] + v[2] * ti.s[2] + ti.s[3]) / tw, (v[0] * ti.t[0] + v[1] * ti.t[1] + v[2] * ti.t[2] + ti.t[3]) / th);
           if (r) {

@@ -174,3 +174,63 @@ describe('lightmap exposure', () => {
     expect(withLight(255)).toBe(1); // already bright: never darkened
   });
 });
+
+describe('brush entities', () => {
+  const box = { mins: [-16, -16, -16], maxs: [16, 16, 16], contents: 1 };
+  const ents = `{ "classname" "worldspawn" }
+{ "classname" "info_player_terrorist" "origin" "0 0 1" }
+{ "classname" "trigger_teleport" "model" "*1" "origin" "1000 0 0" "target" "d" }
+{ "classname" "info_teleport_destination" "targetname" "d" "origin" "0 0 64" }
+{ "classname" "func_brush" "model" "*2" "origin" "0 2000 0" "Solidity" "0" }
+{ "classname" "func_brush" "model" "*3" "origin" "0 3000 0" "Solidity" "1" }
+{ "classname" "func_illusionary" "model" "*4" "origin" "0 4000 0" }
+{ "classname" "trigger_push" "model" "*5" "origin" "0 5000 0" "speed" "500" "pushdir" "0 90 0" "spawnflags" "1" }
+{ "classname" "trigger_push" "model" "*6" "origin" "0 6000 0" "speed" "1200" "pushdir" "-90 0 0" "spawnflags" "1" }
+{ "classname" "trigger_hurt" "model" "*7" "origin" "0 7000 0" "damage" "1000" }
+{ "classname" "trigger_teleport" "model" "*8" "origin" "0 8000 0" "target" "d" "StartDisabled" "1" }
+{ "classname" "trigger_momentum_timer_start" "model" "*9" "origin" "0 9000 0" }
+{ "classname" "func_wall" "model" "*10" "origin" "0 10000 0" }`;
+  const m = parseBsp(buildBsp({ entities: ents, world: [floor], submodels: Array.from({ length: 10 }, () => [box]) }), 'ents');
+  const at = (y: number) => m.brushes.some((b) => b.mins.y === y - 16 && b.maxs.y === y + 16);
+
+  it('places entity brushes at the entity origin (models are stored origin-relative)', () => {
+    expect(m.teleports).toHaveLength(1); // the StartDisabled one is skipped
+    expect(m.teleports[0].brushes[0].mins).toEqual({ x: 984, y: -16, z: -16 });
+  });
+  it('makes solid brush entities collide, and leaves non-solid ones out', () => {
+    expect(at(2000)).toBe(true); // func_brush, Solidity 0
+    expect(at(10000)).toBe(true); // func_wall
+    expect(at(3000)).toBe(false); // func_brush, Solidity 1 = never solid
+    expect(at(4000)).toBe(false); // func_illusionary
+  });
+  it('reads trigger_push speed and direction', () => {
+    expect(m.pushes).toHaveLength(2);
+    const [side, up] = m.pushes;
+    expect(side.vel.x).toBeCloseTo(0, 6);
+    expect(side.vel.y).toBeCloseTo(500, 6);
+    expect(up.vel.z).toBeCloseTo(1200, 6); // pitch -90 points straight up
+    expect(side.brushes[0].mins.y).toBe(5000 - 16);
+  });
+  it('reads trigger_hurt as respawn volumes and Momentum timer triggers as zones', () => {
+    expect(m.hurts[0].mins.y).toBe(7000 - 16);
+    expect(m.startZone![0].mins.y).toBe(9000 - 16);
+  });
+});
+
+describe('brush entity faces', () => {
+  it('draws func_illusionary faces at the entity origin', () => {
+    const ents = `{ "classname" "worldspawn" }\n{ "classname" "func_illusionary" "model" "*1" "origin" "1000 0 0" }`;
+    const m = parseBsp(
+      buildBsp({
+        entities: ents,
+        world: [floor],
+        submodels: [[{ mins: [-16, -16, -16], maxs: [16, 16, 16], contents: 0 }]],
+        face: [{ verts: [[-16, -16, 0], [16, -16, 0], [16, 16, 0]], reflectivity: [1, 1, 1], name: 'DECOR', flags: 0, model: 1 }],
+      }),
+      'f',
+    );
+    expect(m.mesh.groups.map((g) => g.texture)).toEqual(['DECOR']);
+    const xs = [0, 3, 6].map((i) => m.mesh.positions[i]).sort((a, b) => a - b);
+    expect(xs).toEqual([984, 1016, 1016]); // triangle x = -16, 16, 16 shifted by the origin
+  });
+});
