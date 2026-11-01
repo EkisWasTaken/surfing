@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseBsp } from '../src/bsp';
+import { parseBsp, decodeLight } from '../src/bsp';
 import { buildBsp } from './bspBuilder';
 import { trace } from '../src/trace';
 import { config } from '../src/config';
@@ -114,5 +114,63 @@ describe('static props', () => {
   });
   it('maps with no props give an empty list', () => {
     expect(parseBsp(file(), 't').props).toEqual([]);
+  });
+});
+
+describe('lightmaps', () => {
+  // 5×5 luxels: corner (0,0) is orange-ish, everything else is a half-strength gray (128 * 2^-1).
+  const samples = Array.from({ length: 25 }, (_, i) => (i === 0 ? [128, 64, 32, 0] : [128, 128, 128, -1]));
+  const lit = (hdrOnly: boolean) =>
+    parseBsp(
+      buildBsp({
+        entities,
+        world: [floor],
+        submodels: [],
+        hdrOnly,
+        face: [
+          { verts: [[-512, -512, 0], [512, -512, 0], [512, 512, 0], [-512, 512, 0]], reflectivity: [1, 1, 1], name: 'LIT', flags: 0, light: { size: [4, 4], samples } },
+          { verts: [[600, 0, 0], [700, 0, 0], [700, 100, 0]], reflectivity: [1, 1, 1], name: 'UNLIT', flags: 0 },
+        ],
+      }),
+      'l',
+    );
+  const texel = (m: ReturnType<typeof parseBsp>, vertex: number) => {
+    const { width, height, data } = m.lightmap;
+    const x = Math.floor(m.mesh.lmUvs[vertex * 2] * width), y = Math.floor(m.mesh.lmUvs[vertex * 2 + 1] * height);
+    return Array.from(data.slice((y * width + x) * 4, (y * width + x) * 4 + 3)).map(decodeLight);
+  };
+  const vertexAt = (m: ReturnType<typeof parseBsp>, x: number, y: number) => {
+    const p = m.mesh.positions;
+    for (let i = 0; i < p.length / 3; i++) if (p[i * 3] === x && p[i * 3 + 1] === y) return i;
+    throw new Error('vertex not found');
+  };
+
+  it.each([false, true])('maps each vertex to its luxel and decodes RGBE (hdrOnly=%s)', (hdrOnly) => {
+    const m = lit(hdrOnly);
+    texel(m, vertexAt(m, -512, -512)).forEach((v, k) => expect(v).toBeCloseTo([128, 64, 32][k] / 255, 2));
+    texel(m, vertexAt(m, 512, 512)).forEach((v) => expect(v).toBeCloseTo(64 / 255, 2));
+  });
+
+  it('points faces without lighting at a white texel', () => {
+    const m = lit(false);
+    texel(m, vertexAt(m, 600, 0)).forEach((v) => expect(v).toBeCloseTo(1, 1));
+  });
+});
+
+describe('lightmap exposure', () => {
+  const withLight = (value: number) =>
+    parseBsp(
+      buildBsp({
+        entities,
+        world: [floor],
+        submodels: [],
+        face: [{ verts: [[-512, -512, 0], [512, -512, 0], [512, 512, 0], [-512, 512, 0]], reflectivity: [1, 1, 1], name: 'LIT', flags: 0, light: { size: [4, 4], samples: Array.from({ length: 25 }, () => [value, value, value, 0]) } }],
+      }),
+      'e',
+    ).lightmap.exposure;
+  it('scales so the brighter lit surfaces land at 0.5, clamped to 1–8×', () => {
+    expect(withLight(64)).toBeCloseTo(0.5 / (64 / 255), 1); // ≈ 2×
+    expect(withLight(8)).toBe(8); // very dark map: capped
+    expect(withLight(255)).toBe(1); // already bright: never darkened
   });
 });

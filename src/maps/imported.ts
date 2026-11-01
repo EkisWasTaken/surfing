@@ -41,6 +41,7 @@ export function bspToMap(bsp: BspMap, fileName: string): MapDef & { goalFromMap:
     teleports: bsp.teleports,
     mesh: bsp.mesh,
     props: bsp.props,
+    lightmap: bsp.lightmap,
     pak: bsp.pak,
   };
 }

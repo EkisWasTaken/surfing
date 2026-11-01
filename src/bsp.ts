@@ -10,7 +10,10 @@ export type StaticProp = { model: string; origin: Vec3; angles: Vec3; skin: numb
 export type BspMap = {
   brushes: Brush[];
   // Triangles sorted by texture; each group is one texture's range of vertices.
-  mesh: { positions: Float32Array; colors: Float32Array; uvs: Float32Array; groups: { texture: string; start: number; count: number }[] };
+  mesh: { positions: Float32Array; colors: Float32Array; uvs: Float32Array; lmUvs: Float32Array; groups: { texture: string; start: number; count: number }[] };
+  // Baked lighting atlas, RGBA8 with each channel = encodeLight(linear light).
+  // exposure: map-wide brightness scale standing in for Source's overbright/auto-exposure.
+  lightmap: { width: number; height: number; data: Uint8Array; exposure: number };
   pak: Map<string, Uint8Array>; // files packed in the map (materials, textures, models)
   props: StaticProp[];
   spawn: Vec3;
@@ -21,11 +24,24 @@ export type BspMap = {
   killZ: number;
 };
 
-const L = { GAME: 35, PAKFILE: 40, ENTITIES: 0, PLANES: 1, TEXDATA: 2, VERTEXES: 3, NODES: 5, TEXINFO: 6, FACES: 7, LEAFS: 10, EDGES: 12, SURFEDGES: 13, MODELS: 14, LEAFBRUSHES: 17, BRUSHES: 18, BRUSHSIDES: 19, TEXSTR_DATA: 43, TEXSTR_TABLE: 44 };
+const L = { LIGHTING: 8, LIGHTING_HDR: 53, FACES_HDR: 58, GAME: 35, PAKFILE: 40, ENTITIES: 0, PLANES: 1, TEXDATA: 2, VERTEXES: 3, NODES: 5, TEXINFO: 6, FACES: 7, LEAFS: 10, EDGES: 12, SURFEDGES: 13, MODELS: 14, LEAFBRUSHES: 17, BRUSHES: 18, BRUSHSIDES: 19, TEXSTR_DATA: 43, TEXSTR_TABLE: 44 };
 // MASK_PLAYERSOLID: solid | window | grate | playerclip | monster.
 const PLAYER_SOLID = 0x1 | 0x2 | 0x8 | 0x10000 | 0x2000000;
 // sky2d | sky | trigger | nodraw | hint | skip
 const HIDDEN_SURF = 0x2 | 0x4 | 0x40 | 0x80 | 0x100 | 0x200;
+const SURF_NOLIGHT = 0x400;
+
+// Lightmaps go into 8 bits as sqrt(light / 4): keeps 4× overbright with precision where it matters (darks).
+export const encodeLight = (v: number) => Math.round(Math.sqrt(Math.min(1, Math.max(0, v / 4))) * 255);
+export const decodeLight = (b: number) => (b / 255) ** 2 * 4;
+
+// One exposure per map: put the 75th-percentile lit luxel at 0.5 linear, within 1–8×.
+function exposureFor(lums: number[]): number {
+  if (!lums.length) return 1;
+  lums.sort((a, b) => a - b);
+  const p75 = lums[Math.floor(lums.length * 0.75)];
+  return p75 > 0 ? Math.min(8, Math.max(1, 0.5 / p75)) : 8;
+}
 
 type Entity = Record<string, string>;
 
@@ -141,7 +157,7 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
 
   return {
     brushes: modelBrushes(0, PLAYER_SOLID),
-    mesh: readFaces(),
+    ...readFaces(),
     props: readProps(),
     pak: (() => {
       const { ofs, len } = lump(L.PAKFILE);
@@ -210,8 +226,22 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
       while (end < strOfs + strLen && dv.getUint8(end) !== 0) end++;
       return new TextDecoder().decode(new Uint8Array(buffer, start, end - start));
     };
-    const faces = records(L.FACES, 56, (o) => ({ plane: u16(o), side: dv.getUint8(o + 2), firstedge: i32(o + 4), numedges: i16(o + 8), texinfo: i16(o + 10) }));
-    const buckets = new Map<string, { pos: number[]; col: number[]; uv: number[] }>();
+    const faceRec = (o: number) => ({ plane: u16(o), side: dv.getUint8(o + 2), firstedge: i32(o + 4), numedges: i16(o + 8), texinfo: i16(o + 10), style0: dv.getUint8(o + 16), lightofs: i32(o + 20), lmMins: [i32(o + 28), i32(o + 32)], lmSize: [i32(o + 36), i32(o + 40)] });
+    const faces = records(L.FACES, 56, faceRec);
+    // LDR lighting uses the main face table; HDR-only maps keep light offsets in a parallel HDR face table.
+    let light = lump(L.LIGHTING);
+    let lightFaces = faces;
+    if (!light.len) {
+      light = lump(L.LIGHTING_HDR);
+      const hdrFaces = records(L.FACES_HDR, 56, faceRec);
+      lightFaces = hdrFaces.length === faces.length ? hdrFaces : [];
+    }
+    const lmS = (o: number) => [f32(o + 32), f32(o + 36), f32(o + 40), f32(o + 44)];
+    const lmT = (o: number) => [f32(o + 48), f32(o + 52), f32(o + 56), f32(o + 60)];
+    const lmAxes = records(L.TEXINFO, 72, (o) => ({ s: lmS(o), t: lmT(o) }));
+
+    type Item = { tex: string; poly: number[][]; color: number[]; ti: number; face: number; rect: { x: number; y: number; w: number; h: number } | null };
+    const items: Item[] = [];
     const world = models[0];
     for (let fi = world.firstface; fi < world.firstface + world.numfaces && fi < faces.length; fi++) {
       const f = faces[fi];
@@ -220,9 +250,6 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
       const td = texdata[ti.texdata];
       const tex = td ? texName(td.nameId) : '';
       if (/^tools\//i.test(tex)) continue;
-      let bucket = buckets.get(tex);
-      if (!bucket) buckets.set(tex, (bucket = { pos: [], col: [], uv: [] }));
-      const tw = td?.w ?? 1, th = td?.h ?? 1;
       const poly: number[][] = [];
       for (let k = 0; k < f.numedges; k++) {
         const se = surfedges[f.firstedge + k];
@@ -230,29 +257,88 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
         const v = e && verts[se >= 0 ? e[0] : e[1]];
         if (v) poly.push(v);
       }
-      const c = td?.color ?? [0.6, 0.6, 0.6];
+      const lf = lightFaces[fi];
+      const w = lf ? lf.lmSize[0] + 1 : 0, h = lf ? lf.lmSize[1] + 1 : 0;
+      const hasLight = lf && !(ti.flags & SURF_NOLIGHT) && lf.style0 !== 255 && lf.lightofs >= 0 && w > 0 && h > 0 && w <= 512 && h <= 512 && lf.lightofs + w * h * 4 <= light.len;
+      items.push({ tex, poly, color: td?.color ?? [0.6, 0.6, 0.6], ti: f.texinfo, face: fi, rect: hasLight ? { x: 0, y: 0, w, h } : null });
+    }
+
+    // Shelf-pack every face's luxel rectangle into one atlas; texel (0,0) is reserved white for unlit faces.
+    const rects = items.map((it) => it.rect).filter((r): r is NonNullable<Item['rect']> => !!r);
+    const area = rects.reduce((s, r) => s + r.w * r.h, 1);
+    let W = 256;
+    while (W < 8192 && W * W < area * 1.3) W *= 2;
+    W = Math.max(W, ...rects.map((r) => r.w));
+    let x = 1, y = 0, shelf = 1;
+    for (const r of [...rects].sort((a, b) => b.h - a.h)) {
+      if (x + r.w > W) (x = 0), (y += shelf), (shelf = 0);
+      r.x = x;
+      r.y = y;
+      x += r.w;
+      shelf = Math.max(shelf, r.h);
+    }
+    let H = 1;
+    while (H < y + shelf) H *= 2;
+    const atlas = new Uint8Array(W * H * 4).fill(255);
+    atlas.set([encodeLight(1), encodeLight(1), encodeLight(1), 255], 0);
+    for (const it of items) {
+      if (!it.rect) continue;
+      const r = it.rect;
+      let o = light.ofs + lightFaces[it.face].lightofs;
+      for (let ty = 0; ty < r.h; ty++)
+        for (let tx = 0; tx < r.w; tx++, o += 4) {
+          // ColorRGBExp32: channel * 2^exponent (signed), in 0..255 linear units.
+          const scale = Math.pow(2, dv.getInt8(o + 3)) / 255;
+          const a = ((r.y + ty) * W + r.x + tx) * 4;
+          atlas[a] = encodeLight(dv.getUint8(o) * scale);
+          atlas[a + 1] = encodeLight(dv.getUint8(o + 1) * scale);
+          atlas[a + 2] = encodeLight(dv.getUint8(o + 2) * scale);
+        }
+    }
+
+    const buckets = new Map<string, { pos: number[]; col: number[]; uv: number[]; lm: number[] }>();
+    const lums: number[] = [];
+    for (const it of items) {
+      let bucket = buckets.get(it.tex);
+      if (!bucket) buckets.set(it.tex, (bucket = { pos: [], col: [], uv: [], lm: [] }));
+      const ti = texinfo[it.ti], ax = lmAxes[it.ti], td = texdata[ti.texdata];
+      const tw = td?.w ?? 1, th = td?.h ?? 1;
+      const lf = lightFaces[it.face];
       // Wind counter-clockwise around the face's front normal (Source stores faces clockwise).
+      const f = faces[it.face];
       const pn = planes[f.plane]?.normal ?? vec(0, 0, 1);
       const sign = f.side ? -1 : 1;
+      const { poly, rect: r } = it;
       for (let k = 1; k + 1 < poly.length; k++) {
         const [a, b, d] = [poly[0], poly[k], poly[k + 1]];
         const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = d[0] - a[0], vy = d[1] - a[1], vz = d[2] - a[2];
         const facing = ((uy * vz - uz * vy) * pn.x + (uz * vx - ux * vz) * pn.y + (ux * vy - uy * vx) * pn.z) * sign;
         for (const v of facing >= 0 ? [a, b, d] : [a, d, b]) {
           bucket.pos.push(...v);
-          bucket.col.push(...c);
+          bucket.col.push(...it.color);
           bucket.uv.push((v[0] * ti.s[0] + v[1] * ti.s[1] + v[2] * ti.s[2] + ti.s[3]) / tw, (v[0] * ti.t[0] + v[1] * ti.t[1] + v[2] * ti.t[2] + ti.t[3]) / th);
+          if (r) {
+            // Luxel coordinates within the face, sampled at luxel centres so filtering stays inside the rectangle.
+            const s = Math.min(r.w - 1, Math.max(0, v[0] * ax.s[0] + v[1] * ax.s[1] + v[2] * ax.s[2] + ax.s[3] - lf.lmMins[0]));
+            const t = Math.min(r.h - 1, Math.max(0, v[0] * ax.t[0] + v[1] * ax.t[1] + v[2] * ax.t[2] + ax.t[3] - lf.lmMins[1]));
+            bucket.lm.push((r.x + s + 0.5) / W, (r.y + t + 0.5) / H);
+            const a = ((r.y + Math.floor(t)) * W + r.x + Math.floor(s)) * 4;
+            lums.push(0.2126 * decodeLight(atlas[a]) + 0.7152 * decodeLight(atlas[a + 1]) + 0.0722 * decodeLight(atlas[a + 2]));
+          } else bucket.lm.push(0.5 / W, 0.5 / H);
         }
       }
     }
     const groups: BspMap['mesh']['groups'] = [];
-    const pos: number[] = [], col: number[] = [], uv: number[] = [];
+    const pos: number[] = [], col: number[] = [], uv: number[] = [], lm: number[] = [];
     for (const [texture, b] of buckets) {
       if (!b.pos.length) continue;
       groups.push({ texture, start: pos.length / 3, count: b.pos.length / 3 });
       for (let i = 0; i < b.pos.length; i++) pos.push(b.pos[i]), col.push(b.col[i]);
-      for (let i = 0; i < b.uv.length; i++) uv.push(b.uv[i]);
+      for (let i = 0; i < b.uv.length; i++) uv.push(b.uv[i]), lm.push(b.lm[i]);
     }
-    return { positions: new Float32Array(pos), colors: new Float32Array(col), uvs: new Float32Array(uv), groups };
+    return {
+      mesh: { positions: new Float32Array(pos), colors: new Float32Array(col), uvs: new Float32Array(uv), lmUvs: new Float32Array(lm), groups },
+      lightmap: { width: W, height: H, data: atlas, exposure: exposureFor(lums) },
+    };
   }
 }

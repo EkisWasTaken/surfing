@@ -15,6 +15,7 @@ export type MapDef = {
   mesh?: BspMap['mesh']; // imported maps render this instead of brushes
   pak?: BspMap['pak'];
   props?: BspMap['props'];
+  lightmap?: BspMap['lightmap'];
 };
 
 type Section = { angle: number; width: number };

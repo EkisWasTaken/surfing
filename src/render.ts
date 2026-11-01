@@ -30,10 +30,16 @@ function surfaceMaterial(image: HTMLCanvasElement, scale: number, flat?: HTMLCan
   return new THREE.ShaderMaterial({
     defines: flat ? { BSP: 1 } : {},
     vertexColors: !!flat,
-    uniforms: { map: { value: texture(image) }, flatMap: { value: texture(flat ?? image) }, scale: { value: scale }, sun: { value: SUN }, haze: { value: HORIZON } },
+    uniforms: { map: { value: texture(image) }, flatMap: { value: texture(flat ?? image) }, lightmap: { value: null }, exposure: { value: 1 }, scale: { value: scale }, sun: { value: SUN }, haze: { value: HORIZON } },
     vertexShader: /* glsl */ `
       varying vec3 vWorld; varying vec3 vNormal; varying vec3 vTint;
+      #ifdef BSP
+        attribute vec2 lmUv; varying vec2 vLm;
+      #endif
       void main() {
+        #ifdef BSP
+          vLm = lmUv;
+        #endif
         vec4 w = modelMatrix * vec4(position, 1.0);
         vWorld = w.xyz; vNormal = normalize(mat3(modelMatrix) * normal);
         #ifdef USE_COLOR
@@ -44,8 +50,11 @@ function surfaceMaterial(image: HTMLCanvasElement, scale: number, flat?: HTMLCan
         gl_Position = projectionMatrix * viewMatrix * w;
       }`,
     fragmentShader: /* glsl */ `
-      uniform sampler2D map; uniform sampler2D flatMap; uniform float scale; uniform vec3 sun; uniform vec3 haze;
+      uniform sampler2D map; uniform sampler2D flatMap; uniform sampler2D lightmap; uniform float exposure; uniform float scale; uniform vec3 sun; uniform vec3 haze;
       varying vec3 vWorld; varying vec3 vNormal; varying vec3 vTint;
+      #ifdef BSP
+        varying vec2 vLm;
+      #endif
       vec3 tri(sampler2D t, vec3 p, vec3 w) { return texture2D(t, p.zy).rgb * w.x + texture2D(t, p.xz).rgb * w.y + texture2D(t, p.xy).rgb * w.z; }
       void main() {
         vec3 n = normalize(vNormal);
@@ -55,8 +64,13 @@ function surfaceMaterial(image: HTMLCanvasElement, scale: number, flat?: HTMLCan
         #ifdef BSP
           albedo = mix(albedo, tri(flatMap, p, w), smoothstep(0.6, 0.8, n.y)) * clamp(vTint * 2.2, 0.35, 1.6);
         #endif
-        float diffuse = max(dot(n, sun), 0.0);
-        vec3 color = albedo * (vec3(0.42, 0.38, 0.36) + vec3(1.0, 0.9, 0.75) * diffuse * 0.85);
+        #ifdef BSP
+          vec3 l = texture2D(lightmap, vLm).rgb; // baked light stored as sqrt(light / 4)
+          vec3 color = albedo * l * l * 4.0 * exposure;
+        #else
+          float diffuse = max(dot(n, sun), 0.0);
+          vec3 color = albedo * (vec3(0.42, 0.38, 0.36) + vec3(1.0, 0.9, 0.75) * diffuse * 0.85);
+        #endif
         float fog = 1.0 - exp(-length(vWorld - cameraPosition) / 24000.0);
         gl_FragColor = vec4(mix(color, haze, fog * 0.75), 1.0);
         #include <colorspace_fragment>
@@ -122,7 +136,7 @@ export function rampGeometry(b: Brush): THREE.BufferGeometry {
 }
 
 // Source-space triangle soup to three.js space (x, z, -y), flat-shaded.
-function bspGeometry({ positions, colors, uvs, groups }: BspMap['mesh']): THREE.BufferGeometry {
+function bspGeometry({ positions, colors, uvs, lmUvs, groups }: BspMap['mesh']): THREE.BufferGeometry {
   const p = new Float32Array(positions.length);
   for (let i = 0; i < p.length; i += 3) {
     p[i] = positions[i];
@@ -133,6 +147,7 @@ function bspGeometry({ positions, colors, uvs, groups }: BspMap['mesh']): THREE.
   g.setAttribute('position', new THREE.BufferAttribute(p, 3));
   g.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   g.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+  g.setAttribute('lmUv', new THREE.BufferAttribute(lmUvs, 2));
   groups.forEach((gr, i) => g.addGroup(gr.start, gr.count, i));
   g.computeVertexNormals();
   return g;
@@ -211,6 +226,7 @@ export function createRenderer(canvas: HTMLCanvasElement) {
   const bspMat = surfaceMaterial(sandstone(), 256, limestone());
   const s3tc = renderer.extensions.has('WEBGL_compressed_texture_s3tc');
   let materials: ReturnType<typeof createMaterialSource> | null = null;
+  let lightmap: THREE.DataTexture | null = null;
   const world = new THREE.Group();
   scene.add(world);
   let hfov = 90;
@@ -225,19 +241,30 @@ export function createRenderer(canvas: HTMLCanvasElement) {
   resize();
 
   return {
-    setMap(map: { brushes: Brush[]; mesh?: BspMap['mesh']; pak?: BspMap['pak']; props?: BspMap['props'] }) {
+    setMap(map: { brushes: Brush[]; mesh?: BspMap['mesh']; pak?: BspMap['pak']; props?: BspMap['props']; lightmap?: BspMap['lightmap'] }) {
       const geometries = new Set<THREE.BufferGeometry>();
       world.traverse((o) => o instanceof THREE.Mesh && geometries.add(o.geometry));
       geometries.forEach((g) => g.dispose());
       materials?.dispose();
       materials = null;
+      lightmap?.dispose();
+      lightmap = null;
       world.clear();
       if (map.mesh) {
         // The map's own textures where packed and decodable, desert fallback elsewhere.
-        materials = createMaterialSource(map.pak ?? new Map(), s3tc, SUN, HORIZON);
+        if (map.lightmap) {
+          const { width, height, data } = map.lightmap;
+          lightmap = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
+          lightmap.magFilter = lightmap.minFilter = THREE.LinearFilter; // raw values, no mips (they'd blend neighbouring faces)
+          lightmap.userData.exposure = map.lightmap.exposure;
+          lightmap.needsUpdate = true;
+        }
+        bspMat.uniforms.exposure.value = map.lightmap?.exposure ?? 1;
+        bspMat.uniforms.lightmap.value = lightmap;
+        materials = createMaterialSource(map.pak ?? new Map(), s3tc, SUN, HORIZON, lightmap);
         const src = materials;
-        world.add(new THREE.Mesh(bspGeometry(map.mesh), map.mesh.groups.map((g) => src.get([g.texture]) ?? bspMat)));
-        for (const p of propMeshes(map.props ?? [], map.pak ?? new Map(), (c) => src.get(c) ?? floorMat)) world.add(p);
+        world.add(new THREE.Mesh(bspGeometry(map.mesh), map.mesh.groups.map((g) => src.get([g.texture], true) ?? bspMat)));
+        for (const p of propMeshes(map.props ?? [], map.pak ?? new Map(), (c) => src.get(c, false) ?? floorMat)) world.add(p);
         return;
       }
       for (const b of map.brushes) world.add(new THREE.Mesh(b.kind === 'ramp' ? rampGeometry(b) : boxGeometry(b), b.kind === 'ramp' ? rampMat : floorMat));

@@ -7,7 +7,11 @@ export function buildBsp(opts: {
   entities: string;
   world: BoxSpec[];
   submodels: BoxSpec[][]; // models 1..n
-  face?: { verts: number[][]; reflectivity: number[]; name: string; flags: number; normal?: number[] }[];
+  // light.size = luxels per axis minus one (Source's LightmapTextureSizeInLuxels); samples are [r, g, b, exp] per luxel.
+  // Lightmap axes: s = x/256 + 2, t = y/256 + 2 (so a ±512 face spans luxels 0..4).
+  face?: { verts: number[][]; reflectivity: number[]; name: string; flags: number; normal?: number[]; light?: { size: number[]; samples: number[][] } }[];
+  // Put lighting in the HDR lumps only (53 + face table 58), leaving the LDR face offsets meaningless, as real HDR-only maps do.
+  hdrOnly?: boolean;
   lzmaLump?: boolean;
   ident?: string;
   // Static props game lump ('sprp'), version 10 (76-byte entries) or 11 (80, with scale).
@@ -64,6 +68,28 @@ export function buildBsp(opts: {
     planes.push({ n: n.map((x) => x / len), d: 0 });
     return { firstedge, numedges: f.verts.length, texinfo: names.length - 1, plane: planes.length - 1 };
   });
+  const lighting: number[] = [];
+  const lightOfs = faces.map((f) => {
+    if (!f.light) return -1;
+    const o = lighting.length;
+    for (const s of f.light.samples) lighting.push(s[0], s[1], s[2], s[3] & 0xff);
+    return o;
+  });
+  const writeFace = (lightofsFor: (i: number) => number) => (dv: DataView, o: number, i: number) => {
+    dv.setUint16(o, faceRecs[i].plane, true);
+    dv.setInt32(o + 4, faceRecs[i].firstedge, true);
+    dv.setInt16(o + 8, faceRecs[i].numedges, true);
+    dv.setInt16(o + 10, faceRecs[i].texinfo, true);
+    dv.setInt16(o + 12, -1, true);
+    dv.setUint8(o + 16, 0); // style 0 = normal light; rest unused (255)
+    dv.setUint8(o + 17, 255);
+    dv.setUint8(o + 18, 255);
+    dv.setUint8(o + 19, 255);
+    dv.setInt32(o + 20, lightofsFor(i), true);
+    const size = faces[i].light?.size ?? [0, 0];
+    dv.setInt32(o + 36, size[0], true);
+    dv.setInt32(o + 40, size[1], true);
+  };
   const strData = names.map((n) => n + '\0').join('');
   const strOffsets: number[] = [];
   names.reduce((off, n) => (strOffsets.push(off), off + n.length + 1), 0);
@@ -74,8 +100,10 @@ export function buildBsp(opts: {
     { index: 2, size: 32, count: faces.length, write: (dv, o, i) => { faces[i].reflectivity.forEach((v, k) => dv.setFloat32(o + k * 4, v, true)); dv.setInt32(o + 12, i, true); dv.setInt32(o + 16, 128, true); dv.setInt32(o + 20, 128, true); } },
     { index: 3, size: 12, count: verts.length, write: (dv, o, i) => verts[i].forEach((v, k) => dv.setFloat32(o + k * 4, v, true)) },
     { index: 5, size: 32, count: models.length, write: (dv, o, i) => { dv.setInt32(o + 4, -(i + 1), true); dv.setInt32(o + 8, -(i + 1), true); } },
-    { index: 6, size: 72, count: faces.length, write: (dv, o, i) => { dv.setFloat32(o, 1, true); dv.setFloat32(o + 20, -1, true); dv.setInt32(o + 64, faces[i].flags, true); dv.setInt32(o + 68, i, true); } },
-    { index: 7, size: 56, count: faceRecs.length, write: (dv, o, i) => { dv.setUint16(o, faceRecs[i].plane, true); dv.setInt32(o + 4, faceRecs[i].firstedge, true); dv.setInt16(o + 8, faceRecs[i].numedges, true); dv.setInt16(o + 10, faceRecs[i].texinfo, true); dv.setInt16(o + 12, -1, true); } },
+    { index: 6, size: 72, count: faces.length, write: (dv, o, i) => { dv.setFloat32(o, 1, true); dv.setFloat32(o + 20, -1, true); dv.setFloat32(o + 32, 1 / 256, true); dv.setFloat32(o + 44, 2, true); dv.setFloat32(o + 52, 1 / 256, true); dv.setFloat32(o + 60, 2, true); dv.setInt32(o + 64, faces[i].flags, true); dv.setInt32(o + 68, i, true); } },
+    { index: 7, size: 56, count: faceRecs.length, write: writeFace((i) => (opts.hdrOnly ? 0 : lightOfs[i])) },
+    { index: opts.hdrOnly ? 53 : 8, bytes: new Uint8Array(lighting) },
+    ...(opts.hdrOnly ? [{ index: 58, size: 56, count: faceRecs.length, write: writeFace((i) => lightOfs[i]) }] : []),
     { index: 10, size: 32, count: leafs.length, write: (dv, o, i) => { dv.setInt32(o, 1, true); dv.setUint16(o + 24, leafs[i].first, true); dv.setUint16(o + 26, leafs[i].num, true); } },
     { index: 12, size: 4, count: edges.length, write: (dv, o, i) => { dv.setUint16(o, edges[i][0], true); dv.setUint16(o + 2, edges[i][1], true); } },
     { index: 13, size: 4, count: surfedges.length, write: (dv, o, i) => dv.setInt32(o, surfedges[i], true) },
