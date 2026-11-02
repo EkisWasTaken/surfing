@@ -1,18 +1,21 @@
-# Fits the licensed arms and karambit together, animates them and exports the game's modern viewmodel.
-#   MODELS=<folder with arms/ and knife/ unzipped> blender -b -P scripts/blender/fit_modern.py
+# Fits the licensed arms and a knife together, animates them and exports a viewmodel for the game.
+#   MODELS=<folder with arms/ and knife/ unzipped> blender -b -P scripts/blender/fit_viewmodel.py
+#   VM_SET=retro makes the Classic set instead: the same arms cut down to a low-poly, pixel-textured look, with a simple straight knife of ours.
 # Models (both CC BY, see the README's credits): "FREE [FPS Arms] GameReady - RIGGED" by bamenwo05, "Karambit Knife" by ediirawan.
 # Space: metres, camera at the origin looking along +Y, +X right, +Z up (glTF export makes that three's -Z forward).
 import math
 import os
+import bmesh
 import bpy
 from mathutils import Euler, Matrix, Quaternion, Vector
 from mathutils.bvhtree import BVHTree
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 MODELS = os.environ['MODELS']
-OUT = os.path.join(ROOT, 'src', 'assets', 'viewmodel', 'modern.glb')
+RETRO = os.environ.get('VM_SET') == 'retro'
+OUT = os.path.join(ROOT, 'src', 'assets', 'viewmodel', 'retro.glb' if RETRO else 'modern.glb')
 FPS = 30
-TEX = 1024
+TEX = 128 if RETRO else 1024
 
 
 def frame(origin, y, z):
@@ -42,8 +45,13 @@ def pbr(name, base, normal, rough, metal=None):
     def tex(path, data):
         n = nt.nodes.new('ShaderNodeTexImage')
         n.image = image(path, data)
+        if RETRO:
+            n.interpolation = 'Closest'  # chunky pixels
         return n
     nt.links.new(tex(base, False).outputs['Color'], b.inputs['Base Color'])
+    if RETRO:
+        b.inputs['Roughness'].default_value = 0.9
+        return m
     nt.links.new(tex(rough, True).outputs['Color'], b.inputs['Roughness'])
     if metal:
         nt.links.new(tex(metal, True).outputs['Color'], b.inputs['Metallic'])
@@ -68,6 +76,16 @@ T = lambda n: at('arms', 'textures', n)
 mesh.data.materials[0] = pbr('arm', T('Arm_and_Hand_Arm_BaseColor.png'), T('Arm_and_Hand_Arm_Normal.png'), T('Arm_and_Hand_Arm_Roughness.png'))
 mesh.data.materials[1] = pbr('hand', T('Hand_Hand_BaseColor.png'), T('Hand_Hand_Normal.png'), T('Hand_Hand_Roughness.png'))
 
+if RETRO:
+    for mod in list(mesh.modifiers):
+        mesh.modifiers.remove(mod)
+    bpy.context.view_layer.objects.active = mesh
+    dec = mesh.modifiers.new('cut', 'DECIMATE')
+    dec.ratio = 0.14
+    bpy.ops.object.modifier_apply(modifier=dec.name)
+    mesh.modifiers.new('Armature', 'ARMATURE').object = arm
+    print('RETRO arms tris', sum(len(p.vertices) - 2 for p in mesh.data.polygons))
+
 bones = arm.data.bones
 head = lambda n: bones[n].head_local.copy()
 # Rest frames, right arm: hand with +Y along the fingers, +Z out of the back of the hand, +X towards the little finger.
@@ -80,19 +98,61 @@ to_hand = HAND0.inverted()
 print('HANDFRAME', {n: [round(c, 3) for c in to_hand @ head(n)] for n in ('Finger_1_1.R', 'Finger_2_1.R', 'Finger_3_1.R', 'Finger_4_1.R', 'Finger_5_1.R')})
 
 # ---------- Knife: ring on the index finger, handle across the fist, grooves towards the fingers, tip curling forward ----------
-RING_MODEL = Vector((1.84, 0, 0.79))  # ring centre in the model
-KNIFE_SCALE = 0.038  # 4.97 long -> 19 cm
-RING_HAND = Vector((-0.026, 0.086, -0.030))  # ring centre in hand space: the index finger's first joint passes through it
-bpy.ops.import_scene.fbx(filepath=at('knife', 'source', 'karambit_sketchfab', 'model', 'karambit_sketchfab.fbx'))
-knife = bpy.data.objects['karambit_low']
-bpy.data.objects.remove(bpy.data.objects['karambit_low.001'])  # the artist's second presentation copy
-K = lambda n: at('knife', 'textures', 'karambit_low_karambit_' + n + '.png')
-knife.data.materials[0] = pbr('knife', K('BaseColor'), K('Normal'), K('Roughness'), K('Metallic'))
-# Model -X (ring to blade) -> hand +X, model -Z (grooves) -> hand +Y, model -Y -> hand +Z.
-SEAT = Matrix(((-1, 0, 0), (0, 0, -1), (0, -1, 0))).to_4x4()
-place = HAND0 @ Matrix.Translation(RING_HAND) @ SEAT @ Matrix.Scale(KNIFE_SCALE, 4) @ Matrix.Translation(-RING_MODEL)
-knife.data.transform(place @ knife.matrix_world)
-knife.matrix_world = Matrix.Identity(4)
+RING_HAND = Vector((-0.026, 0.080, -0.027)) if RETRO else Vector((-0.026, 0.086, -0.030))  # knife origin in hand space
+
+
+def flat(name, color, rough, metal=0.0):
+    m = bpy.data.materials.new(name)
+    m.use_nodes = True
+    b = m.node_tree.nodes['Principled BSDF']
+    b.inputs['Base Color'].default_value = (*color, 1)
+    b.inputs['Roughness'].default_value = rough
+    b.inputs['Metallic'].default_value = metal
+    return m
+
+
+if RETRO:
+    # Straight knife across the fist: blade out of the thumb side, pommel past the little finger. Hand space, then to rest.
+    bm = bmesh.new()
+    def box(x0, x1, w, t, mat):
+        c = RING_HAND + Vector(((x0 + x1) / 2, 0, 0))
+        made = bmesh.ops.create_cube(bm, size=1, matrix=Matrix.Translation(c) @ Matrix.Diagonal((x1 - x0, w, t, 1)))
+        for v in made['verts']:
+            for f in v.link_faces:
+                f.material_index = mat
+    box(-0.012, 0.098, 0.020, 0.014, 1)  # handle
+    box(0.098, 0.112, 0.026, 0.020, 2)  # pommel
+    box(-0.026, -0.012, 0.050, 0.024, 2)  # guard
+    rows = []
+    for x, w in [(-0.026, 0.027), (-0.105, 0.025), (-0.155, 0.015), (-0.185, 0.0)]:
+        p = RING_HAND + Vector((x, 0, 0))
+        rows.append([bm.verts.new(p + Vector((0, -w / 2, 0.0032))), bm.verts.new(p + Vector((0, -w / 2, -0.0032))), bm.verts.new(p + Vector((0, w / 2, -0.0003))), bm.verts.new(p + Vector((0, w / 2, 0.0003)))])
+    for r0, r1 in zip(rows, rows[1:]):
+        for k in range(4):
+            bm.faces.new((r0[k], r0[(k + 1) % 4], r1[(k + 1) % 4], r1[k]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    bm.transform(HAND0)
+    me = bpy.data.meshes.new('knife')
+    bm.to_mesh(me)
+    bm.free()
+    knife = bpy.data.objects.new('knife', me)
+    bpy.context.collection.objects.link(knife)
+    for m in (flat('steel', (0.62, 0.64, 0.67), 0.38, 0.8), flat('grip', (0.05, 0.04, 0.03), 0.85), flat('guard', (0.26, 0.26, 0.27), 0.5, 0.6)):
+        me.materials.append(m)
+else:
+    # Licensed karambit: ring on the index finger, handle across the fist, grooves towards the fingers, tip curling forward.
+    RING_MODEL = Vector((1.84, 0, 0.79))  # ring centre in the model
+    KNIFE_SCALE = 0.038  # 4.97 long -> 19 cm
+    bpy.ops.import_scene.fbx(filepath=at('knife', 'source', 'karambit_sketchfab', 'model', 'karambit_sketchfab.fbx'))
+    knife = bpy.data.objects['karambit_low']
+    bpy.data.objects.remove(bpy.data.objects['karambit_low.001'])  # the artist's second presentation copy
+    K = lambda n: at('knife', 'textures', 'karambit_low_karambit_' + n + '.png')
+    knife.data.materials[0] = pbr('knife', K('BaseColor'), K('Normal'), K('Roughness'), K('Metallic'))
+    # Model -X (ring to blade) -> hand +X, model -Z (grooves) -> hand +Y, model -Y -> hand +Z.
+    SEAT = Matrix(((-1, 0, 0), (0, 0, -1), (0, -1, 0))).to_4x4()
+    place = HAND0 @ Matrix.Translation(RING_HAND) @ SEAT @ Matrix.Scale(KNIFE_SCALE, 4) @ Matrix.Translation(-RING_MODEL)
+    knife.data.transform(place @ knife.matrix_world)
+    knife.matrix_world = Matrix.Identity(4)
 knife.parent = arm
 knife.modifiers.new('Armature', 'ARMATURE').object = arm
 knife.vertex_groups.new(name='knife').add(list(range(len(knife.data.vertices))), 1.0, 'REPLACE')
@@ -107,10 +167,11 @@ bpy.ops.object.mode_set(mode='OBJECT')
 
 # ---------- Poses ----------
 # Where the right hand rests in view, and the forearm leading to it.
-WRIST = Vector((0.185, 0.405, -0.082))
-HAND_X = Vector((-0.10, 0.22, -0.97))  # little finger side down: a hammer grip, with the blade hanging below the fist
-HAND_Y = Vector((-0.62, 0.76, 0.18))  # knuckles close to in line with the forearm, turned to show the blade's flat
-FORE_DIR = Vector((-0.40, 0.84, 0.36)).normalized()
+WRIST = Vector((0.150, 0.300, -0.098)) if RETRO else Vector((0.185, 0.405, -0.082))
+# Little finger side. Modern: down, a hammer grip with the blade below the fist. Classic: down and back, so the straight blade points up and forward.
+HAND_X = Vector((0.16, -0.46, -0.87)) if RETRO else Vector((-0.10, 0.22, -0.97))
+HAND_Y = Vector((-0.66, 0.72, -0.08)) if RETRO else Vector((-0.62, 0.76, 0.18))  # knuckles close to in line with the forearm, turned to show the blade's flat
+FORE_DIR = Vector((-0.52, 0.78, 0.30)).normalized() if RETRO else Vector((-0.40, 0.84, 0.36)).normalized()
 x, y = HAND_X.normalized(), HAND_Y.normalized()
 y = (y - x * y.dot(x)).normalized()
 HAND_T = Matrix((x, y, x.cross(y))).transposed().to_4x4()
@@ -141,7 +202,7 @@ X, Y, Z = Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1))
 knife_hand = (HAND0.inverted() @ Matrix.Identity(4))
 KV = [knife_hand @ v.co for v in knife.data.vertices]
 BVH = BVHTree.FromPolygons(KV, [tuple(p.vertices) for p in knife.data.polygons])
-GROOVE_X = {'2': RING_HAND.x, '3': RING_HAND.x + 0.0255, '4': RING_HAND.x + 0.0468, '5': RING_HAND.x + 0.0684}
+GROOVE_X = {'2': RING_HAND.x, '3': RING_HAND.x + 0.0255, '4': RING_HAND.x + 0.0468, '5': RING_HAND.x + 0.0684}  # the knuckles' own spacing suits the straight handle too
 FINGER_R = {'2': 0.0082, '3': 0.0085, '4': 0.0082, '5': 0.0072}
 
 
@@ -182,7 +243,7 @@ def cost(f, joints):
             if i > 0 and p.z > -0.012 and p.y < 0.098:
                 c += 40 * (p.z + 0.012) ** 2  # nor through the palm
     c += 6 * (joints[3].x - GROOVE_X[f]) ** 2 + 6 * (joints[1].x - GROOVE_X[f]) ** 2  # stay in this finger's groove
-    if f == '2':
+    if f == '2' and not RETRO:
         c += 12 * ((joints[0].lerp(joints[1], 0.75) - RING_HAND).length) ** 2  # through the ring
     return c
 
@@ -410,11 +471,20 @@ INSPECT = [
     Key(4.00, spin=720),
 ]
 bpy.context.scene.render.fps = FPS  # the FBX import reset it
-for name, keys in dict(draw=DRAW, idle=IDLE, light1=LIGHT1, light2=LIGHT2, heavy=HEAVY, lookat01=INSPECT).items():
+def timed(keys, f):
+    for k in keys:
+        k.t *= f
+    return keys
+
+
+# Classic has quicker slashes (a 0.35 s cooldown) and no inspect.
+CLIPS = dict(draw=DRAW, idle=IDLE, light1=timed(LIGHT1, 0.7), light2=timed(LIGHT2, 0.7), heavy=HEAVY) if RETRO else dict(draw=DRAW, idle=IDLE, light1=LIGHT1, light2=LIGHT2, heavy=HEAVY, lookat01=INSPECT)
+for name, keys in CLIPS.items():
     bake(name, keys)
 
-mesh.data.polygons.foreach_set('use_smooth', [True] * len(mesh.data.polygons))
+mesh.data.polygons.foreach_set('use_smooth', [not RETRO] * len(mesh.data.polygons))  # hard facets for the retro look
+mesh.data.update()
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.export_scene.gltf(filepath=OUT, export_format='GLB', use_selection=True, export_animations=True, export_animation_mode='ACTIONS', export_skins=True, export_apply=False, export_yup=True, export_cameras=False, export_lights=False, export_force_sampling=True, export_image_format='WEBP', export_image_quality=85)
-print('modern: done', os.path.getsize(OUT))
+print('viewmodel done', OUT, os.path.getsize(OUT))
 

@@ -130,10 +130,10 @@ npm run build     # type-check and production build
 
 ## Credits
 
-- Arms: [FREE [FPS Arms] GameReady - RIGGED](https://sketchfab.com/3d-models/none-296d30fc705b4dff85c2c8a2d2724e7f) by bamenwo05, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Posed and animated for this game.
-- Knife: [Karambit Knife](https://sketchfab.com/3d-models/none-554aac0e619e45f0a95b7c15cac7219c) by ediirawan, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Rigged into the hand, textures resized.
+- Arms: [FREE [FPS Arms] GameReady - RIGGED](https://sketchfab.com/3d-models/none-296d30fc705b4dff85c2c8a2d2724e7f) by bamenwo05, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Posed and animated for this game, and cut down to a low-poly, pixel-textured version for Classic mode.
+- Knife: [Karambit Knife](https://sketchfab.com/3d-models/none-554aac0e619e45f0a95b7c15cac7219c) by ediirawan, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Rigged into the hand, textures resized. Classic mode's straight knife is original to this game.
 
-To rebuild them, unzip the two downloads into `arms/` and `knife/` in one folder (and the knife's inner `.rar` in place), then run `scripts/blender/fit_modern.py` in Blender with `MODELS` set to that folder.
+To rebuild them, unzip the two downloads into `arms/` and `knife/` in one folder (and the knife's inner `.rar` in place), then run `scripts/blender/fit_viewmodel.py` in Blender with `MODELS` set to that folder. Add `VM_SET=retro` for the Classic set.
 
 ## Disclaimer
 

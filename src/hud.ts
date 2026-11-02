@@ -140,7 +140,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
                 <tr><td>Open or close this menu</td><td>Esc</td></tr>
               </tbody>
             </table>
-            <p class="note credits">Arms: <a href="https://sketchfab.com/3d-models/none-296d30fc705b4dff85c2c8a2d2724e7f" target="_blank" rel="noopener">FREE [FPS Arms] GameReady - RIGGED</a> by bamenwo05. Knife: <a href="https://sketchfab.com/3d-models/none-554aac0e619e45f0a95b7c15cac7219c" target="_blank" rel="noopener">Karambit Knife</a> by ediirawan. Both <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, posed and animated for this game.</p>
+            <p class="note credits">Arms: <a href="https://sketchfab.com/3d-models/none-296d30fc705b4dff85c2c8a2d2724e7f" target="_blank" rel="noopener">FREE [FPS Arms] GameReady - RIGGED</a> by bamenwo05. Knife: <a href="https://sketchfab.com/3d-models/none-554aac0e619e45f0a95b7c15cac7219c" target="_blank" rel="noopener">Karambit Knife</a> by ediirawan. Both <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, posed and animated for this game (a simplified version of the arms in ${gameLabel('cs16')}).</p>
           </div>
         </form>
         <footer class="buttons"><button class="play" type="button">Play</button></footer>
