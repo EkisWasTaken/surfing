@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Surf Sandbox</title>
+<meta name="description" content="A free CS-style surf game for you and your friends, with a leaderboard for every map.">
+<link rel="icon" href="icon.png">
+<style>
+  /* The game's own Modern menu: slate panels, bevelled edges, Tahoma, and its HUD orange for the one thing to press. */
+  :root {
+    --panel: #2b3038; --well: #1f232a; --light: #4a515d; --dark: #15181d;
+    --text: #e4e6ea; --dim: #a7afba; --press: #ffa000; --press-dark: #9a6000;
+    --font: Tahoma, Verdana, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--dark); color-scheme: dark; }
+  body { margin: 0; color: var(--text); font: 14px/1.5 var(--font); }
+  a { color: inherit; }
+  a:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+
+  .stage {
+    min-height: 100vh; min-height: 100svh; display: flex; align-items: center;
+    padding: 24px clamp(16px, 6vw, 96px);
+    background: var(--dark) url(game.jpg) 62% bottom / cover no-repeat;
+  }
+  .window {
+    width: min(520px, 100%); background: var(--panel);
+    border: 1px solid; border-color: var(--light) var(--dark) var(--dark) var(--light);
+    box-shadow: 0 0 0 1px #0008, 0 18px 50px #0009;
+  }
+  .titlebar { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 12px 18px 8px; }
+  h1 { margin: 0; font: 700 26px/1.2 var(--font); }
+  .platform { color: var(--dim); font-size: 12px; }
+  .pitch { margin: 0; padding: 0 18px 16px; max-width: 46ch; font-size: 15px; }
+
+  .get { padding: 16px 18px 18px; background: var(--well); border-block: 1px solid; border-color: var(--dark) transparent var(--light); }
+  .download {
+    display: block; padding: 13px 16px; text-align: center; text-decoration: none;
+    font: 700 18px/1.2 var(--font); color: #1b1200; background: var(--press);
+    border: 1px solid; border-color: #ffd27a var(--press-dark) var(--press-dark) #ffd27a;
+  }
+  .download:hover { background: #ffb32e; }
+  .download:active { border-color: var(--press-dark) #ffd27a #ffd27a var(--press-dark); }
+  .fine { margin: 8px 0 0; color: var(--dim); font-size: 12px; }
+
+  dl { margin: 0; padding: 6px 18px 12px; display: grid; grid-template-columns: 8.5em 1fr; }
+  dt, dd { margin: 0; padding: 8px 0; border-top: 1px solid var(--well); font-size: 13px; }
+  dt { font-weight: 700; padding-right: 12px; }
+  dd { color: var(--dim); }
+  dl > :nth-child(-n+2) { border-top: 0; }
+  kbd { font: inherit; color: var(--text); }
+
+  footer { padding: 20px clamp(16px, 6vw, 96px) 28px; color: var(--dim); font-size: 12px; }
+  footer p { margin: 0 0 8px; max-width: 80ch; }
+
+  @media (max-width: 520px) {
+    .stage { background-position: 70% bottom; align-items: flex-start; }
+    dl { grid-template-columns: 1fr; }
+    dt { padding-bottom: 0; }
+    dd { padding-top: 0; border-top: 0; }
+    dl > :nth-child(2) { border-top: 0; }
+  }
+</style>
+</head>
+<body>
+<main class="stage">
+  <section class="window" aria-labelledby="title">
+    <header class="titlebar"><h1 id="title">Surf Sandbox</h1><span class="platform">For Windows, free</span></header>
+    <p class="pitch">CS-style surf for you and your friends, with a leaderboard for every map and a ghost of your best run to race.</p>
+    <div class="get">
+      <a class="download" href="https://github.com/EkisWasTaken/surfing/releases/latest/download/Surf-Sandbox-Setup.exe">Download for Windows</a>
+      <p class="fine">A 5 MB installer, for Windows 10 or 11. Or <a href="play/">play in your browser</a> instead.</p>
+    </div>
+    <dl>
+      <dt>Windows warning</dt>
+      <dd>The app isn't code-signed, so Windows may say it protected your PC. Choose <kbd>More info</kbd>, then <kbd>Run anyway</kbd>.</dd>
+      <dt>Leaderboards</dt>
+      <dd>Get your group's code from whoever set it up, then enter it on the Records tab.</dd>
+      <dt>Have Counter-Strike?</dt>
+      <dd>On the Display tab you can import the knives, skins and maps from your own copy. The files stay on your PC, and the game plays fine without them.</dd>
+      <dt>Updates</dt>
+      <dd>The game shows an update button when a new version is ready.</dd>
+    </dl>
+  </section>
+</main>
+<footer>
+  <p>A fan project, not affiliated with or endorsed by Valve. Counter-Strike, CS:GO and CS2 are trademarks of Valve Corporation. The game ships no Valve files.</p>
+  <p>Arms: <a href="https://sketchfab.com/3d-models/none-296d30fc705b4dff85c2c8a2d2724e7f">FREE [FPS Arms] GameReady</a> by bamenwo05. Karambit: <a href="https://sketchfab.com/3d-models/none-554aac0e619e45f0a95b7c15cac7219c">Karambit Knife</a> by ediirawan. M9 Bayonet: <a href="https://sketchfab.com/3d-models/m9-bayonet-knife-6d6d3163afc8428b8a212d347ce01f39">M9 Bayonet Knife</a> by ThomasEs. All under <a href="https://creativecommons.org/licenses/by/4.0/">CC BY 4.0</a>, posed and rigged for this game.</p>
+  <p><a href="https://github.com/EkisWasTaken/surfing">Source on GitHub</a></p>
+</footer>
+</body>
+</html>

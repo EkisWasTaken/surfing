@@ -12,3 +12,5 @@ align/
 src-tauri/target
 src-tauri/gen
 worker/.group-code.txt
+_site
+release/

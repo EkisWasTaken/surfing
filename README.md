@@ -44,6 +44,23 @@ The build leaves out `public/`, where imported Steam files live, so `dist` is al
 
 The app contains no Valve files. A player with Counter-Strike in Steam can press **Import from my CS install** on the Display tab: the app reads their own CS2/CS:GO and CS 1.6 folders and builds the real knives, skins, arms and maps list in its data folder on that PC, in about a minute. **Back to built-in models** deletes those files again. Without CS, the game uses its built-in models. The app can only read those two game folders and its own data.
 
+## Publishing
+
+The website is the download page in `site/` with the browser version under `play/`. `npm run site` builds it into `_site`. Both of these only run when you start them from the Actions tab on GitHub.
+
+**First time only:**
+
+1. Add a repository secret named `TAURI_SIGNING_PRIVATE_KEY` holding the contents of `~/.surf-sandbox/updater.key`.
+2. Add a repository variable named `VITE_LEADERBOARD_URL` holding the leaderboard's address.
+
+**A new version:**
+
+1. Raise `version` in `src-tauri/tauri.conf.json` and push.
+2. Run **Release the desktop app**. It publishes the installer, and players get an update button the next time they open the game.
+3. Run **Deploy to GitHub Pages** if the website or browser version changed.
+
+Keep a backup of `updater.key` somewhere safe. Players' apps only accept updates signed with it, so without it they'd have to reinstall by hand.
+
 ## Leaderboard
 
 Each map has a leaderboard for you and your friends, on the Records tab. Modern, Classic and 128-tick have separate boards, and only saved runs count. Without the setup below the game works the same, with no leaderboard.

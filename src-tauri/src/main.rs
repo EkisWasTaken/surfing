@@ -8,10 +8,28 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 use tauri::http::{Method, Request, Response, StatusCode};
 use tauri::Manager;
+use tauri_plugin_updater::UpdaterExt;
 
 #[tauri::command]
 fn quit(app: tauri::AppHandle) {
     app.exit(0);
+}
+
+// The version waiting on the release page, if it's newer than this one. Updates are signed, and refused if the signature is wrong.
+#[tauri::command]
+async fn check_update(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    let update = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
+    Ok(update.map(|u| u.version))
+}
+
+// On Windows the installer closes the game and starts the new version.
+#[tauri::command]
+async fn install_update(app: tauri::AppHandle) -> Result<(), String> {
+    let update = app.updater().map_err(|e| e.to_string())?.check().await.map_err(|e| e.to_string())?;
+    match update {
+        Some(u) => u.download_and_install(|_, _| {}, || {}).await.map_err(|e| e.to_string()),
+        None => Ok(()),
+    }
 }
 
 // The "path" entries of Steam's libraryfolders.vdf.
@@ -159,7 +177,8 @@ fn route(request: Request<Vec<u8>>, cache: Option<PathBuf>) -> Response<Vec<u8>>
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![quit])
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .invoke_handler(tauri::generate_handler![quit, check_update, install_update])
         .register_asynchronous_uri_scheme_protocol("surfsteam", |ctx, request, responder| {
             let cache = ctx.app_handle().path().app_local_data_dir().ok().map(|d| d.join("imported"));
             std::thread::spawn(move || responder.respond(route(request, cache)));

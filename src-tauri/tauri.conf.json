@@ -10,12 +10,39 @@
   "app": {
     "withGlobalTauri": true,
     "windows": [
-      { "title": "Surf Sandbox", "width": 1280, "height": 720, "minWidth": 800, "minHeight": 600, "center": true }
+      {
+        "title": "Surf Sandbox",
+        "width": 1280,
+        "height": 720,
+        "minWidth": 800,
+        "minHeight": 600,
+        "center": true
+      }
     ],
-    "security": { "csp": null }
+    "security": {
+      "csp": null
+    }
   },
   "bundle": {
-    "active": false,
-    "icon": ["icons/icon.ico", "icons/icon.png"]
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/icon.ico",
+      "icons/icon.png"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU2MkIwOTc1NzBERDM3RUEKUldUcU45MXdkUWtyVmpWdlpFcGMyYUc1dW85Z21vait3YndYaWdWanIxMTNvRFZpVWlpY2RFcDQK",
+      "endpoints": [
+        "https://github.com/EkisWasTaken/surfing/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

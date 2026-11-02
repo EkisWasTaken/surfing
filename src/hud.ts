@@ -10,6 +10,7 @@ type HudOptions = {
   onPlay: () => void;
   onCloseMenu: () => void;
   onQuit: (() => void) | null; // only the desktop app can close itself
+  onUpdate: () => void;
   onRealImport: () => void;
   onRealRemove: () => void;
   onBoardOpen: (mapId?: string) => void;
@@ -101,6 +102,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
           }).join('')}</div>
         <footer class="buttons">
           <button type="button" class="button startSettings">Options</button>
+          <button type="button" class="button updateGame" hidden></button>
           <button type="button" class="button startPlay">Play</button>
         </footer>
       </section>
@@ -244,6 +246,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
         </form>
         <footer class="buttons">
           <button type="button" class="button quitGame" hidden>Quit game</button>
+          <button type="button" class="button updateGame" hidden></button>
           <button type="button" class="button exitFullscreen" hidden>Exit fullscreen</button>
           <button class="play" type="button">Play</button>
         </footer>
@@ -375,6 +378,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     el.fullscreen.checked = false;
     change({ fullscreen: false });
   });
+  root.querySelectorAll('.updateGame').forEach((b) => b.addEventListener('click', opts.onUpdate));
   if (opts.onQuit) {
     const quit = $('.quitGame');
     quit.hidden = false;
@@ -697,6 +701,9 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       $('.boardWho').textContent = name ? `You're "${name}" on the boards.` : 'Played here before? Your recovery code brings your name and times back.';
     },
     clearRecoveryInput: () => (recoveryInput.value = ''),
+    showUpdate(label: string) {
+      root.querySelectorAll<HTMLButtonElement>('.updateGame').forEach((b) => ((b.hidden = false), (b.textContent = label)));
+    },
     setBoardNote: (text: string) => ($('.boardNote').textContent = text),
     setFinishBoard: (text: string) => ($('.finishBoard').textContent = text),
     setShareNote: (msg: string) => ($('.shareNote').textContent = msg),

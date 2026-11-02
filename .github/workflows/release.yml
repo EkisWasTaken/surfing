@@ -1,0 +1,38 @@
+name: Release the desktop app
+
+# Manual only: run it from the Actions tab when you want to publish a new version.
+# Raise "version" in src-tauri/tauri.conf.json first. Needs the TAURI_SIGNING_PRIVATE_KEY secret and the VITE_LEADERBOARD_URL variable.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run installer
+        env:
+          VITE_LEADERBOARD_URL: ${{ vars.VITE_LEADERBOARD_URL }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+      - name: Publish the installer and update file
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $bundle = 'src-tauri/target/release/bundle/nsis'
+          # A fixed name, so the download page's link always gets the newest one.
+          Copy-Item "$bundle/Surf Sandbox_${version}_x64-setup.exe" Surf-Sandbox-Setup.exe
+          $url = "https://github.com/${{ github.repository }}/releases/download/v$version/Surf-Sandbox-Setup.exe"
+          npx vite-node scripts/write-release-manifest.ts $version "$bundle/Surf Sandbox_${version}_x64-setup.exe.sig" $url latest.json
+          gh release create "v$version" Surf-Sandbox-Setup.exe latest.json --title "Surf Sandbox $version" --generate-notes

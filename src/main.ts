@@ -112,6 +112,7 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
   onRealImport: () => importRealModels(),
   onRealRemove: () => void removeRealModels(),
   onQuit: tauri ? () => void tauri.core.invoke('quit') : null,
+  onUpdate: () => installUpdate(),
   onBoardOpen: (mapId) => void showBoard(mapId),
   onGroupJoin: (code) => void joinGroup(code),
   onCopyRecovery: () => copyRecovery(),
@@ -827,7 +828,13 @@ async function removeRealModels() {
   await fetch(`${STEAM}/clear`, { method: 'POST' }).catch(() => {});
   location.reload();
 }
+// Updating replaces the app, not your records, settings or imported CS files.
+function installUpdate() {
+  hud.flash('Downloading the update. The game restarts when it\'s ready.');
+  tauri?.core.invoke('install_update').catch(() => hud.flash("The update couldn't be installed. Try again later."));
+}
 if (DESKTOP) {
+  tauri?.core.invoke('check_update').then((v) => v && hud.showUpdate(`Update to ${v}`)).catch(() => {}); // offline, or no release yet: nothing to offer
   gameFolders()
     .then((f) => {
       const found = [f.csgo && 'CS2/CS:GO', f.halfLife && 'CS 1.6'].filter(Boolean).join(' and ');

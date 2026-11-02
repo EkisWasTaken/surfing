@@ -8,7 +8,9 @@
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
     "import-maps": "vite-node scripts/import-maps.ts",
-    "app": "tauri build --no-bundle"
+    "app": "tauri build --no-bundle",
+    "installer": "tauri build",
+    "site": "npm run build && node scripts/build-site.mjs"
   },
   "dependencies": {
     "meshoptimizer": "^0.25.0",
