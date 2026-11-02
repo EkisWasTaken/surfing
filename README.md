@@ -38,6 +38,10 @@ The build leaves out `public/`, where imported Steam files live, so `dist` is al
 - **Replay:** watch your best run from behind, from the Records tab.
 - **Checkpoints:** 1 saves, 2 returns, 3 steps back through earlier ones (practice runs).
 
+## Adding maps
+
+The hosted game can ship other people's maps if they've said yes. See [licensed-maps/README.md](licensed-maps/README.md).
+
 ## Getting started
 
 You need Node.js 20 or newer.

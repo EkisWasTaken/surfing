@@ -1,11 +1,21 @@
 import { defineConfig } from 'vite';
 import { readdirSync } from 'node:fs';
+import { checkLicensedMaps } from './scripts/licensed-maps';
 
 export default defineConfig(({ command }) => ({
   // public/ only holds files imported from Steam (maps, knives): never copied into the public build.
   publicDir: command === 'build' ? false : 'public',
   base: './', // works from any folder, e.g. username.github.io/surfing/
+  assetsInclude: ['**/*.bsp'],
   plugins: [
+    // licensed-maps/ ships publicly: no build without credit and proof for every map.
+    {
+      name: 'licensed-maps-check',
+      buildStart() {
+        const errors = checkLicensedMaps('licensed-maps');
+        if (errors.length) throw new Error(`licensed-maps:\n  ${errors.join('\n  ')}`);
+      },
+    },
     // Lists the .bsp files in public/maps so the menu can offer them without a hand-kept index.
     {
       name: 'maps-index',

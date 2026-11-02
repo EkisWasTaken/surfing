@@ -306,13 +306,12 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   // Start screen: the map list drives the same setting as the menu's map picker.
   const start = $('.start'), cards = [...root.querySelectorAll<HTMLButtonElement>('.mapCard')];
   const markCard = () => cards.forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.map === el.map.value)));
-  cards.forEach((c) =>
-    c.addEventListener('click', () => {
-      el.map.value = c.dataset.map!;
-      el.map.dispatchEvent(new Event('input', { bubbles: true }));
-      markCard();
-    }),
-  );
+  const pickCard = (c: HTMLButtonElement) => {
+    el.map.value = c.dataset.map!;
+    el.map.dispatchEvent(new Event('input', { bubbles: true }));
+    markCard();
+  };
+  cards.forEach((c) => c.addEventListener('click', () => pickCard(c)));
   markCard();
   $('.startPlay').addEventListener('click', () => {
     start.hidden = true;
@@ -591,6 +590,29 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       el.finish.replaceChildren(new Option('Vanilla', ''), ...list.map((f) => new Option(f.name, f.id)));
       el.finish.value = list.some((f) => f.id === cur.finish) ? cur.finish : '';
       $('.finishOpts').hidden = list.length === 0;
+    },
+    // A permitted map from licensed-maps/: on the start list, and in the credits.
+    addLicensedMap(m: { id: string; name: string; difficulty?: string; credit: string; source?: string }) {
+      this.addMap({ id: m.id, name: m.name }, false);
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'button mapCard';
+      card.dataset.map = m.id;
+      card.innerHTML = '<i></i><strong></strong><small></small><span class="cardBest"></span>';
+      card.querySelector('strong')!.textContent = m.name;
+      card.querySelector('small')!.textContent = m.difficulty ?? '';
+      card.addEventListener('click', () => pickCard(card));
+      $('.mapCards').append(card);
+      cards.push(card);
+      markCard();
+      const line = document.createElement('p');
+      line.className = 'note credits';
+      if (m.source && /^https:\/\//.test(m.source)) {
+        const a = document.createElement('a');
+        (a.href = m.source), (a.target = '_blank'), (a.rel = 'noopener'), (a.textContent = m.name);
+        line.append(a, ` ${m.credit}`);
+      } else line.textContent = `${m.name} ${m.credit}`;
+      root.querySelector('.credits')!.after(line);
     },
     addMap(m: { id: string; name: string }, select = true) {
       if (![...el.map.options].some((o) => o.value === m.id)) el.map.add(new Option(m.name, m.id));

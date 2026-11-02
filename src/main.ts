@@ -14,6 +14,7 @@ import { parseBsp } from './bsp';
 import { readZip } from './pak';
 import type { VtexJson } from './cs2model';
 import { unb64 } from './b64';
+import licensedMaps from '../licensed-maps/manifest.json';
 import { createGrid } from './grid';
 import { newPlayer, unstick, Player } from './movement';
 import { simTick, touching, newTickState } from './sim';
@@ -33,6 +34,8 @@ if (!document.createElement('canvas').getContext('webgl2')) {
   document.body.innerHTML = '<p style="margin:0;padding:15vh 24px;font:18px/1.5 system-ui,sans-serif;text-align:center;color:#eee;background:#222;min-height:100vh;box-sizing:border-box">This game needs WebGL 2, and your browser couldn\'t start it.<br>Turn on hardware acceleration in your browser\'s settings, or try another browser.</p>';
   throw new Error('WebGL 2 is not available');
 }
+const licensedFiles = import.meta.glob('/licensed-maps/*.bsp', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
+const licensedUrl = (file: string) => licensedFiles[`/licensed-maps/${file}`] as string | undefined;
 const canvas = document.querySelector<HTMLCanvasElement>('#game')!;
 const input = createInput(canvas);
 const renderer = createRenderer(canvas);
@@ -500,6 +503,14 @@ async function loadBsp(read: () => Promise<ArrayBuffer>, name: string, stock?: M
 
 // Maps folder (public/maps, filled by `npm run import-maps`), served by the dev server.
 async function loadFolderMap(file: string) {
+  const permitted = licensedUrl(file);
+  if (permitted) {
+    return loadBsp(async () => {
+      const res = await download(permitted, (f) => showLoading(file, 'Downloading map…', f * 0.65));
+      if (!res.ok) throw new Error(`${file} couldn't be downloaded`);
+      return res.bytes;
+    }, file);
+  }
   showLoading(file, 'Retrieving stock textures…', 0);
   const zip = await download(`/maps/${encodeURIComponent(file.replace(/.bsp$/i, '.stock.zip'))}`, (f) => showLoading(file, 'Retrieving stock textures…', f * 0.2)).catch(() => null);
   // The dev server answers unknown paths with its HTML page, which reads as an empty zip: treat that as no bundle.
@@ -592,6 +603,11 @@ function loadClassic() {
   });
 }
 if (settings.game === 'cs16') loadClassic();
+// Maps used with permission (licensed-maps/), in every build.
+for (const m of licensedMaps as { file: string; name: string; author: string; permission: string; source?: string; difficulty?: string }[]) {
+  hud.addLicensedMap({ id: `bsp:${m.file}`, name: m.name, difficulty: m.difficulty, source: m.source, credit: `by ${m.author}. ${m.permission}.` });
+}
+if (wantedMap.startsWith('bsp:') && licensedUrl(wantedMap.slice(4))) loadFolderMap(wantedMap.slice(4));
 // The public build has none of these files, so it doesn't ask for them.
 if (!OWN_MODELS) {
 fetch('/cs16/v_knife.mdl')
