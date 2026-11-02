@@ -6,6 +6,7 @@ import math
 import os
 import bpy
 from mathutils import Euler, Matrix, Quaternion, Vector
+from mathutils.bvhtree import BVHTree
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 MODELS = os.environ['MODELS']
@@ -81,7 +82,7 @@ print('HANDFRAME', {n: [round(c, 3) for c in to_hand @ head(n)] for n in ('Finge
 # ---------- Knife: ring on the index finger, handle across the fist, grooves towards the fingers, tip curling forward ----------
 RING_MODEL = Vector((1.84, 0, 0.79))  # ring centre in the model
 KNIFE_SCALE = 0.038  # 4.97 long -> 19 cm
-RING_HAND = Vector((-0.026, 0.062, -0.029))  # ring centre in hand space
+RING_HAND = Vector((-0.026, 0.086, -0.030))  # ring centre in hand space: the index finger's first joint passes through it
 bpy.ops.import_scene.fbx(filepath=at('knife', 'source', 'karambit_sketchfab', 'model', 'karambit_sketchfab.fbx'))
 knife = bpy.data.objects['karambit_low']
 bpy.data.objects.remove(bpy.data.objects['karambit_low.001'])  # the artist's second presentation copy
@@ -106,10 +107,10 @@ bpy.ops.object.mode_set(mode='OBJECT')
 
 # ---------- Poses ----------
 # Where the right hand rests in view, and the forearm leading to it.
-WRIST = Vector((0.188, 0.375, -0.098))
-HAND_X = Vector((-0.35, 0.25, -0.90))  # little finger side: down and in, so the blade hangs below the fist
-HAND_Y = Vector((-0.72, 0.60, 0.35))  # fingers: in towards the middle of the screen
-FORE_DIR = Vector((-0.42, 0.78, 0.46)).normalized()
+WRIST = Vector((0.185, 0.405, -0.082))
+HAND_X = Vector((-0.10, 0.22, -0.97))  # little finger side down: a hammer grip, with the blade hanging below the fist
+HAND_Y = Vector((-0.62, 0.76, 0.18))  # knuckles close to in line with the forearm, turned to show the blade's flat
+FORE_DIR = Vector((-0.40, 0.84, 0.36)).normalized()
 x, y = HAND_X.normalized(), HAND_Y.normalized()
 y = (y - x * y.dot(x)).normalized()
 HAND_T = Matrix((x, y, x.cross(y))).transposed().to_4x4()
@@ -135,35 +136,168 @@ def curl_axis_local(name, axis_hand, side):
     return (bones[name].matrix_local.to_3x3().inverted() @ axis).normalized()
 
 
-GRIP = {
-    '2': (86, 88, 52),  # index, through the ring
-    '3': (84, 92, 58),
-    '4': (84, 92, 58),
-    '5': (86, 90, 58),
-}
-RELAX = {'2': (30, 34, 22), '3': (36, 40, 26), '4': (40, 44, 28), '5': (44, 48, 30)}
-X, Z = Vector((1, 0, 0)), Vector((0, 0, 1))
+# ---------- Grip: each finger is searched against the knife's real surface ----------
+X, Y, Z = Vector((1, 0, 0)), Vector((0, 1, 0)), Vector((0, 0, 1))
+knife_hand = (HAND0.inverted() @ Matrix.Identity(4))
+KV = [knife_hand @ v.co for v in knife.data.vertices]
+BVH = BVHTree.FromPolygons(KV, [tuple(p.vertices) for p in knife.data.polygons])
+GROOVE_X = {'2': RING_HAND.x, '3': RING_HAND.x + 0.0255, '4': RING_HAND.x + 0.0468, '5': RING_HAND.x + 0.0684}
+FINGER_R = {'2': 0.0082, '3': 0.0085, '4': 0.0082, '5': 0.0072}
 
 
-def set_fingers(p, curls, side, thumb):
-    for f, angles in curls.items():
-        for seg, deg in enumerate(angles):
-            n = f'Finger_{f}_{seg + 1}.{side}'
-            p[n].rotation_quaternion = Quaternion(curl_axis_local(n, X, side), math.radians(-deg))
-    for seg, (axis, deg) in enumerate(thumb):
-        n = f'Finger_1_{seg + 1}.{side}'
-        p[n].rotation_quaternion = Quaternion(curl_axis_local(n, axis, side), math.radians(deg))
+def chain(f, side='R'):
+    names = [f'Finger_{f}_{i}.{side}' for i in (1, 2, 3)]
+    pts = [to_hand @ head(n) for n in names] + [to_hand @ head(f'Finger_{f}_3.{side}_end')]
+    return names, pts
 
 
-THUMB_GRIP = [(Z, -24), (Z, -26), (Z, -24), (Z, -16)]
+def fk(pts, axis, phi, angles):
+    """Joint positions, and each joint's accumulated rotation, after spreading by phi and curling by angles (hand space)."""
+    out, rots, p = [pts[0]], [], pts[0]
+    R = Quaternion(Z, phi)
+    for i, a in enumerate(angles):
+        R = R @ Quaternion(axis, -a)
+        rots.append(R.copy())
+        p = p + R @ (pts[i + 1] - pts[i])
+        out.append(p)
+    return out, rots
+
+
+def signed(p):
+    loc, n, _, d = BVH.find_nearest(p)
+    return d if (p - loc).dot(n) >= 0 else -d
+
+
+def cost(f, joints):
+    r, c = FINGER_R[f], 0.0
+    for i in range(3):
+        a, b = joints[i], joints[i + 1]
+        for k in range(1, 5):
+            p = a.lerp(b, k / 4)
+            d = signed(p)
+            if d < r:
+                c += 60 * (r - d) ** 2  # never through the knife
+            elif i > 0:
+                c += (d - r) ** 2  # the last two joints close on it
+            if i > 0 and p.z > -0.012 and p.y < 0.098:
+                c += 40 * (p.z + 0.012) ** 2  # nor through the palm
+    c += 6 * (joints[3].x - GROOVE_X[f]) ** 2 + 6 * (joints[1].x - GROOVE_X[f]) ** 2  # stay in this finger's groove
+    if f == '2':
+        c += 12 * ((joints[0].lerp(joints[1], 0.75) - RING_HAND).length) ** 2  # through the ring
+    return c
+
+
+def solve(f):
+    names, pts = chain(f)
+    d0 = (pts[1] - pts[0]).normalized()
+    axis = d0.cross(Z).normalized()
+    best, deg = (1e9, None), math.radians
+    for phi in range(-16, 17, 4):
+        for a in range(40, 121, 8):
+            for b in range(30, 121, 8):
+                for c in range(10, 91, 10):
+                    ang = (deg(a), deg(b), deg(c))
+                    v = cost(f, fk(pts, axis, deg(phi), ang)[0])
+                    if v < best[0]:
+                        best = (v, (deg(phi), *ang))
+    phi, *ang = best[1]
+    step = deg(4)
+    for _ in range(3):  # refine around the best
+        for phi2 in (phi - step, phi, phi + step):
+            for a in (ang[0] - step, ang[0], ang[0] + step):
+                for b in (ang[1] - step, ang[1], ang[1] + step):
+                    for c in (ang[2] - step, ang[2], ang[2] + step):
+                        v = cost(f, fk(pts, axis, phi2, (a, b, c))[0])
+                        if v < best[0]:
+                            best = (v, (phi2, a, b, c))
+        phi, *ang = best[1]
+        step /= 2
+    joints, rots = fk(pts, axis, phi, ang)
+    d = [signed(j) for j in joints]
+    print('GRIP', f, 'spread', round(math.degrees(phi)), 'curl', [round(math.degrees(x)) for x in ang], 'tip', [round(c, 3) for c in joints[3]], 'gaps mm', [round((x - FINGER_R[f]) * 1000, 1) for x in d])
+    # Per-joint rest-space rotations: each bone adds its own on top of its parent's.
+    prev, local = Quaternion(), {}
+    for n, R in zip(names, rots):
+        local[n] = prev.inverted() @ R
+        prev = R
+    return local, joints
+
+
+GRIP_ROT = {}
+JOINTS = {}
+for f in '2345':
+    rot, joints = solve(f)
+    GRIP_ROT.update(rot)
+    JOINTS[f] = joints
+
+
+def solve_thumb():
+    """The thumb closes over the index finger, its tip on the outside of the index's middle joint."""
+    names = [f'Finger_1_{i}.R' for i in (1, 2, 3, 4)]
+    pts = [to_hand @ head(n) for n in names] + [to_hand @ head('Finger_1_4.R_end')]
+    target = JOINTS['2'][2] + Vector((-0.006, 0.004, -0.008))
+    best, deg = (1e9, None), math.radians
+    d = (pts[1] - pts[0]).normalized()
+    flex = d.cross(Z).normalized()
+    def run(a, b, c):
+        R = Quaternion(Z, a) @ Quaternion(X, b)
+        rots, p, out = [], pts[0], []
+        for i in range(4):
+            if i:
+                R = R @ Quaternion(flex, -c)
+            rots.append(R.copy())
+            p = p + R @ (pts[i + 1] - pts[i])
+            out.append(p.copy())
+        return out, rots
+    for a in range(-70, 11, 5):
+        for b in range(-60, 31, 5):
+            for c in range(0, 46, 5):
+                out, _ = run(deg(a), deg(b), deg(c))
+                v = (out[-1] - target).length ** 2
+                for p in out:
+                    q = signed(p)
+                    if q < 0.009:
+                        v += 40 * (0.009 - q) ** 2
+                if v < best[0]:
+                    best = (v, (a, b, c))
+    a, b, c = best[1]
+    out, rots = run(deg(a), deg(b), deg(c))
+    print('THUMB', best[1], 'miss mm', round((out[-1] - target).length * 1000, 1))
+    prev, local = Quaternion(), {}
+    for n, R in zip(names, rots):
+        local[n] = prev.inverted() @ R
+        prev = R
+    return local
+
+
+GRIP_ROT.update(solve_thumb())
+RELAX = {'2': (24, 30, 20), '3': (30, 36, 24), '4': (34, 40, 26), '5': (38, 44, 28)}
 THUMB_RELAX = [(Z, -8), (Z, -10), (Z, -8), (Z, -6)]
 
 
-class Key:
-    """Offsets from the hold: loc in metres, rot in degrees (elbow pivot, Y then X then Z), wrist in degrees (hand axes), knife spin in degrees."""
+def set_fingers(p):
+    H = HAND0.to_3x3()
+    for n, q in GRIP_ROT.items():
+        B = bones[n].matrix_local.to_3x3()
+        p[n].rotation_quaternion = (B.inverted() @ H @ q.to_matrix() @ H.inverted() @ B).to_quaternion()
+    for f, angles in RELAX.items():
+        for seg, a in enumerate(angles):
+            n = f'Finger_{f}_{seg + 1}.L'
+            p[n].rotation_quaternion = Quaternion(curl_axis_local(n, X, 'L'), math.radians(-a))
+    for seg, (axis, a) in enumerate(THUMB_RELAX):
+        n = f'Finger_1_{seg + 1}.L'
+        p[n].rotation_quaternion = Quaternion(curl_axis_local(n, axis, 'L'), math.radians(a))
 
-    def __init__(self, t, loc=(0, 0, 0), rot=(0, 0, 0), wrist=(0, 0, 0), spin=0, left=(0, 0, 0)):
-        self.t, self.loc, self.rot, self.wrist, self.spin, self.left = t, Vector(loc), Vector(rot), Vector(wrist), spin, Vector(left)
+
+class Key:
+    """Offsets from the hold: loc in metres, rot in degrees (elbow pivot, Y then X then Z), wrist in degrees (hand axes),
+    knife spin in degrees, roll in degrees (the forearm turning over). ease is how this key is approached."""
+
+    def __init__(self, t, loc=(0, 0, 0), rot=(0, 0, 0), wrist=(0, 0, 0), spin=0, left=(0, 0, 0), roll=0, ease='smooth'):
+        self.t, self.loc, self.rot, self.wrist, self.spin, self.left, self.roll, self.ease = t, Vector(loc), Vector(rot), Vector(wrist), spin, Vector(left), roll, ease
+
+
+EASE = {'smooth': lambda u: u * u * (3 - 2 * u), 'strike': lambda u: u * u * u, 'out': lambda u: 1 - (1 - u) ** 3, 'settle': lambda u: 1 - (1 - u) ** 2}
 
 
 def sample(keys, t):
@@ -171,9 +305,8 @@ def sample(keys, t):
         return keys[0]
     for a, b in zip(keys, keys[1:]):
         if t <= b.t:
-            u = (t - a.t) / (b.t - a.t)
-            u = u * u * (3 - 2 * u)
-            return Key(t, a.loc.lerp(b.loc, u), a.rot.lerp(b.rot, u), a.wrist.lerp(b.wrist, u), a.spin + (b.spin - a.spin) * u, a.left.lerp(b.left, u))
+            u = EASE[b.ease]((t - a.t) / (b.t - a.t))
+            return Key(t, a.loc.lerp(b.loc, u), a.rot.lerp(b.rot, u), a.wrist.lerp(b.wrist, u), a.spin + (b.spin - a.spin) * u, a.left.lerp(b.left, u), a.roll + (b.roll - a.roll) * u)
     return keys[-1]
 
 
@@ -183,8 +316,9 @@ def rad(v):
 
 def pose(p, k):
     off = Matrix.Translation(ELBOW + k.loc) @ Euler(rad(k.rot), 'YXZ').to_matrix().to_4x4() @ Matrix.Translation(-ELBOW)
-    hand = off @ HAND_T @ Euler(rad(k.wrist), 'XYZ').to_matrix().to_4x4() @ HAND0.inverted()
-    fore = off @ FORE_T @ FORE0.inverted()
+    turn = lambda a: Matrix.Translation(WRIST) @ Matrix.Rotation(math.radians(a), 4, FORE_DIR) @ Matrix.Translation(-WRIST)
+    hand = off @ turn(k.roll) @ HAND_T @ Euler(rad(k.wrist), 'XYZ').to_matrix().to_4x4() @ HAND0.inverted()
+    fore = off @ turn(k.roll * 0.6) @ FORE_T @ FORE0.inverted()  # a forearm twists less than the hand on the end of it
     upper = off @ UPPER_T @ UPPER0.inverted()
     left = Matrix.Translation(k.left)
     out = {
@@ -214,8 +348,7 @@ def bake(name, keys):
     p = arm.pose.bones
     for b in p:
         b.rotation_mode = 'QUATERNION'
-    set_fingers(p, GRIP, 'R', THUMB_GRIP)
-    set_fingers(p, RELAX, 'L', THUMB_RELAX)
+    set_fingers(p)
     last = round(keys[-1].t * FPS)
     for f in (0, last):
         for n in FINGER_BONES:
@@ -233,20 +366,48 @@ def bake(name, keys):
     arm.animation_data.action = None
 
 
-DRAW = [Key(0, (0.03, -0.06, -0.20), (-30, -14, 14), (24, 0, 0), -360, (0, 0, -0.08)), Key(0.34, (0, 0.006, 0.010), (3, 2, -2), (-6, 0, 0), -20), Key(0.5, (0, -0.003, -0.003), (-1, 0, 1), (2, 0, 0), 4), Key(0.7)]
-IDLE = [Key(0), Key(2, (0.001, 0, 0.003), (0.6, 0, -0.4), (1.2, 0, 0), 0, (0, 0, 0.003)), Key(4)]
-LIGHT1 = [Key(0), Key(0.09, (0.02, -0.018, 0.018), (5, 5, -16), (10, 0, -14)), Key(0.24, (-0.075, 0.035, 0.022), (-3, -7, 21), (-12, 0, 16)), Key(0.34, (-0.055, 0.016, 0.004), (-6, -4, 15), (-6, 0, 9)), Key(0.5)]
-LIGHT2 = [Key(0), Key(0.09, (-0.07, -0.018, 0.012), (4, -6, 20), (8, 0, 18)), Key(0.24, (0.022, 0.035, 0.02), (-4, 7, -12), (-12, 0, -18)), Key(0.34, (0.012, 0.016, 0.0), (-6, 4, -7), (-6, 0, -8)), Key(0.5)]
-HEAVY = [Key(0), Key(0.26, (0.02, -0.07, 0.04), (14, -6, -5), (16, 0, -4)), Key(0.42, (-0.045, 0.16, -0.01), (-4, 4, 7), (-16, 0, 3)), Key(0.58, (-0.042, 0.15, -0.015), (-6, 4, 6), (-13, 0, 2)), Key(1.0)]
+# Knife timing: a short wind-up, a strike that accelerates into contact, follow-through past it, then a slower settle.
+DRAW = [
+    Key(0, (0.05, -0.10, -0.20), (-34, -12, 14), (30, 0, 0), -360, (0, 0, -0.08)),
+    Key(0.30, (0, 0.006, 0.012), (3, 1, -2), (-5, 0, 0), -24, ease='out'),  # up and the knife spins into the grip
+    Key(0.46, (0, -0.004, -0.004), (-1, 0, 1), (2, 0, 0), 5, ease='settle'),
+    Key(0.70),
+]
+IDLE = [Key(0), Key(2, (0.0012, 0, 0.0028), (0.5, 0, -0.35), (0.9, 0, 0), 0, (0, 0, 0.003)), Key(4)]
+# Forehand: cocked up and out to the right, whipped down across the screen.
+LIGHT1 = [
+    Key(0),
+    Key(0.09, (-0.005, -0.030, 0.050), (8, 4, -10), (12, 0, -8), ease='out'),
+    Key(0.20, (-0.125, 0.070, 0.038), (-3, -5, 20), (-18, 0, 14), ease='strike'),
+    Key(0.28, (-0.150, 0.060, 0.016), (-5, -7, 24), (-22, 0, 18), ease='settle'),
+    Key(0.50, ease='smooth'),
+]
+# Backhand: starts across the body, snaps back out to the right.
+LIGHT2 = [
+    Key(0),
+    Key(0.10, (-0.105, -0.020, 0.030), (-2, -6, 18), (-10, 0, 16), ease='out'),
+    Key(0.21, (-0.040, 0.070, 0.036), (6, 6, -6), (14, 0, -14), ease='strike'),
+    Key(0.29, (-0.030, 0.055, 0.020), (4, 8, -8), (17, 0, -18), ease='settle'),
+    Key(0.50, ease='smooth'),
+]
+# Stab: pulled well back and up, driven straight in, held, drawn out.
+HEAVY = [
+    Key(0),
+    Key(0.24, (-0.035, -0.105, 0.040), (14, -3, -2), (20, 0, -4), ease='out'),
+    Key(0.37, (-0.060, 0.185, -0.022), (-7, 2, 8), (-16, 0, 4), ease='strike'),
+    Key(0.54, (-0.058, 0.170, -0.028), (-8, 2, 7), (-14, 0, 3), ease='settle'),
+    Key(1.0, ease='smooth'),
+]
+# Inspect: raised to the light, turned to show each side of the blade, then twirled round the finger and caught.
 INSPECT = [
     Key(0),
-    Key(0.55, (-0.04, 0.0, 0.05), (6, 0, 8), (-10, 0, 12)),  # bring the blade up to the light
-    Key(1.35, (-0.042, 0.0, 0.054), (7, 0, 9), (-12, 0, 16)),
-    Key(1.9, (-0.085, 0.0, 0.085), (5, 10, 8), (-112, 0, 6)),  # turn the wrist over to show the other side
-    Key(2.55, (-0.088, 0.0, 0.085), (5, 12, 8), (-118, 0, 8)),
-    Key(2.85, (-0.02, 0.0, 0.016), (2, 8, 4), (0, 0, 0), 0),
-    Key(3.45, (-0.02, 0.0, 0.018), (2, 6, 4), (0, 0, 0), 720),  # twirl it round the finger
-    Key(4.0, spin=720),
+    Key(0.55, (-0.060, -0.040, 0.075), (6, 0, 10), (-6, 0, 4), roll=-26),
+    Key(1.30, (-0.063, -0.040, 0.080), (7, 0, 11), (-8, 0, 5), roll=-30),
+    Key(1.95, (-0.070, -0.045, 0.080), (6, 0, 12), (-6, 0, 2), roll=58),
+    Key(2.65, (-0.072, -0.045, 0.078), (6, 0, 12), (-8, 0, 2), roll=64),
+    Key(3.00, (-0.030, -0.015, 0.030), (3, 0, 6), (0, 0, 0)),
+    Key(3.55, (-0.030, -0.015, 0.034), (3, 0, 6), (0, 0, 0), 720, ease='settle'),
+    Key(4.00, spin=720),
 ]
 bpy.context.scene.render.fps = FPS  # the FBX import reset it
 for name, keys in dict(draw=DRAW, idle=IDLE, light1=LIGHT1, light2=LIGHT2, heavy=HEAVY, lookat01=INSPECT).items():
@@ -256,3 +417,4 @@ mesh.data.polygons.foreach_set('use_smooth', [True] * len(mesh.data.polygons))
 bpy.ops.object.select_all(action='SELECT')
 bpy.ops.export_scene.gltf(filepath=OUT, export_format='GLB', use_selection=True, export_animations=True, export_animation_mode='ACTIONS', export_skins=True, export_apply=False, export_yup=True, export_cameras=False, export_lights=False, export_force_sampling=True, export_image_format='WEBP', export_image_quality=85)
 print('modern: done', os.path.getsize(OUT))
+
