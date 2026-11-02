@@ -96,6 +96,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
             <label class="row check"><input name="autobhop" type="checkbox" /><span>Jump again automatically while holding jump</span></label>
             <label class="row check"><input name="showSpeed" type="checkbox" /><span>Show speed on the HUD</span></label>
             <label class="row check"><input name="showGhost" type="checkbox" /><span>Race a ghost of your best run</span></label>
+            <label class="row check"><input name="showViewmodel" type="checkbox" /><span>Show arms and knife</span></label>
           </div>
           <div class="sheet" role="tabpanel" id="sheet-knife" aria-labelledby="tab-knife" hidden>
             <p class="note noKnives">Knives appear after running <code>npm run import-maps</code> with CS2 installed.</p>
@@ -202,6 +203,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   el.autobhop.checked = cur.autobhop;
   el.showSpeed.checked = cur.showSpeed;
   el.showGhost.checked = cur.showGhost;
+  el.showViewmodel.checked = cur.showViewmodel;
   el.wear.value = String(cur.wear);
   el.seed.value = String(cur.seed);
   const wearLabel = (w: number) => `${w.toFixed(3)}, ${w < 0.07 ? 'Factory New' : w < 0.15 ? 'Minimal Wear' : w < 0.38 ? 'Field-Tested' : w < 0.45 ? 'Well-Worn' : 'Battle-Scarred'}`;
@@ -233,6 +235,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       autobhop: el.autobhop.checked,
       showSpeed: el.showSpeed.checked,
       showGhost: el.showGhost.checked,
+      showViewmodel: el.showViewmodel.checked,
       knife: el.knife.value || cur.knife,
       // An unchanged finish list keeps the saved finish even if this knife doesn't offer it.
       finish: e.target === el.finish ? el.finish.value : cur.finish,

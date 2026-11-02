@@ -92,6 +92,7 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
     settings = next;
     applySettings(next);
     saveSettings(next);
+    renderer.setShowViewmodel(next.showViewmodel);
     input.setJumpBind(next.jumpBind);
     renderer.setFov(next.fov);
     if (tickChanged) acc = createAccumulator(1 / config.tickrate);
@@ -311,6 +312,7 @@ con.cvar('tickrate', `64 or 128 (${gameLabel('csgo')} only)`, {
 });
 con.cvar('cl_showfps', 'Show FPS (0/1)', { get: () => (showFps ? '1' : '0'), def: () => '0', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void (showFps = bool(v)!)) });
 con.cvar('cl_showspeed', 'Show speed (0/1)', { get: () => (settings.showSpeed ? '1' : '0'), def: () => '1', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void hud.apply({ showSpeed: bool(v)! })) });
+con.cvar('r_drawviewmodel', 'Show arms and knife (0/1)', { get: () => (settings.showViewmodel ? '1' : '0'), def: () => '1', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void hud.apply({ showViewmodel: bool(v)! })) });
 con.cvar('cl_ghost', 'Ghost of your best (0/1)', { get: () => (settings.showGhost ? '1' : '0'), def: () => '1', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void hud.apply({ showGhost: bool(v)! })) });
 
 // Binds: CS key names → console commands, kept in this browser. "+jump" sets the jump key instead.
@@ -504,6 +506,7 @@ function applyFinish() {
 }
 // CS 1.6's knife and hands (v_knife.mdl from your Counter-Strike install, copied by the import).
 renderer.setGame(settings.game);
+renderer.setShowViewmodel(settings.showViewmodel);
 const gltf = new GLTFLoader();
 // The game's own knives, each loaded when picked (its file carries the arms too).
 const OWN_KNIVES = [{ id: 'knife_karambit', name: 'Karambit', url: karambitModel }, { id: 'knife_m9', name: 'M9 Bayonet', url: m9Model }];

@@ -271,6 +271,7 @@ function propMeshes(props: BspMap['props'], pak: Map<string, Uint8Array>, materi
 }
 
 export function createRenderer(canvas: HTMLCanvasElement) {
+  let showViewmodel = true;
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(window.devicePixelRatio);
   const scene = new THREE.Scene();
@@ -366,6 +367,7 @@ export function createRenderer(canvas: HTMLCanvasElement) {
     attack: (kind: 'light' | 'heavy') => viewmodel.attack(kind),
     setFinish: (choice: Parameters<typeof viewmodel.setFinish>[0]) => viewmodel.setFinish(choice, renderer.extensions.has('EXT_texture_compression_bptc')),
     setOwn: (...a: Parameters<typeof viewmodel.setOwn>) => viewmodel.setOwn(...a),
+    setShowViewmodel: (show: boolean) => (showViewmodel = show),
     setArms: (b: Parameters<typeof viewmodel.setArms>[0]) => viewmodel.setArms(b, renderer.extensions.has('EXT_texture_compression_bptc')),
     setGhost(pos: Vec3 | null) {
       ghost.visible = !!pos;
@@ -383,7 +385,7 @@ export function createRenderer(canvas: HTMLCanvasElement) {
       camera.rotation.x = -pitch * DEG; // Source positive pitch looks down
       renderer.clear();
       renderer.render(scene, camera);
-      if (!viewmodel.empty()) {
+      if (showViewmodel && !viewmodel.empty()) {
         renderer.clearDepth();
         viewmodel.apply(pose);
         renderer.render(viewmodel.scene, viewmodel.camera);
