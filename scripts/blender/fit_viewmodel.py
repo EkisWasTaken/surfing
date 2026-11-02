@@ -1,9 +1,11 @@
 # Fits the licensed arms and a knife together, animates them and exports a viewmodel for the game.
 #   MODELS=<folder with arms/ and knife/ unzipped> blender -b -P scripts/blender/fit_viewmodel.py
 #   VM_KNIFE=m9 uses the M9 Bayonet (MODELS/m9 unzipped) instead of the karambit.
+#   VM_ALIGN=1 writes align/<set>.blend instead of exporting: drag its handles, save, run read_align.py, then rebuild.
 #   VM_SET=retro makes the Classic set instead: the same arms cut down to a low-poly, pixel-textured look, with a simple straight knife of ours.
 # Models (both CC BY, see the README's credits): "FREE [FPS Arms] GameReady - RIGGED" by bamenwo05, "Karambit Knife" by ediirawan.
 # Space: metres, camera at the origin looking along +Y, +X right, +Z up (glTF export makes that three's -Z forward).
+import json
 import math
 import os
 import bmesh
@@ -17,6 +19,10 @@ RETRO = os.environ.get('VM_SET') == 'retro'
 KNIFE = 'straight' if RETRO else os.environ.get('VM_KNIFE', 'karambit')
 UPRIGHT = KNIFE != 'karambit'  # held blade up, in a forward grip; the karambit hangs below the fist
 OUT = os.path.join(ROOT, 'src', 'assets', 'viewmodel', {'straight': 'retro.glb', 'karambit': 'karambit.glb', 'm9': 'm9.glb'}[KNIFE])
+NAME = os.path.splitext(os.path.basename(OUT))[0]
+HOLD_FILE = os.path.join(ROOT, 'scripts', 'blender', 'holds', NAME + '.json')
+HOLD = json.load(open(HOLD_FILE)) if os.path.exists(HOLD_FILE) else None  # set by hand in Blender, see read_align.py
+hold_matrix = lambda v: Matrix([v[i:i + 4] for i in range(0, 16, 4)])
 FPS = 30
 TEX = 128 if RETRO else 1024
 
@@ -167,6 +173,9 @@ else:
     place = HAND0 @ Matrix.Translation(RING_HAND) @ SEAT @ Matrix.Scale(KNIFE_SCALE, 4) @ Matrix.Translation(-RING_MODEL)
     knife.data.transform(place @ knife.matrix_world)
     knife.matrix_world = Matrix.Identity(4)
+KNIFE_ADJ = hold_matrix(HOLD['knife']) if HOLD else Matrix.Identity(4)  # the knife's seat in the hand, moved by hand
+knife.data.transform(HAND0 @ KNIFE_ADJ @ HAND0.inverted())
+RING_HAND = KNIFE_ADJ @ RING_HAND
 knife.parent = arm
 knife.modifiers.new('Armature', 'ARMATURE').object = arm
 knife.vertex_groups.new(name='knife').add(list(range(len(knife.data.vertices))), 1.0, 'REPLACE')
@@ -190,8 +199,12 @@ x, y = HAND_X.normalized(), HAND_Y.normalized()
 y = (y - x * y.dot(x)).normalized()
 HAND_T = Matrix((x, y, x.cross(y))).transposed().to_4x4()
 HAND_T.translation = WRIST
+if HOLD:
+    HAND_T = hold_matrix(HOLD['hand'])
+    WRIST = HAND_T.translation.copy()
+    FORE_DIR = hold_matrix(HOLD['fore']).col[1].to_3d().normalized()
 ELBOW = WRIST - FORE_DIR * L_FORE
-FORE_T = frame(WRIST, FORE_DIR, HAND_T.col[2].to_3d())  # turned with the hand, so the wrist does not twist
+FORE_T = hold_matrix(HOLD['fore']) if HOLD else frame(WRIST, FORE_DIR, HAND_T.col[2].to_3d())  # turned with the hand, so the wrist does not twist
 UPPER_T = frame(ELBOW, (-0.25, 0.75, 0.55), (0, 0, 1))
 # Left arm: mirrored into the lower left, fingers relaxed.
 L_WRIST = Vector((0.33, 0.22, -0.36))  # out of view until something brings it up
@@ -484,6 +497,74 @@ INSPECT = [
     Key(3.55, (-0.030, -0.015, 0.034), (3, 0, 6), (0, 0, 0), 720, ease='settle'),
     Key(4.00, spin=720),
 ]
+if os.environ.get('VM_ALIGN'):
+    # A file for placing the hold by eye: the game's camera, the idle pose, and three handles driving the right arm and knife.
+    p = arm.pose.bones
+    for b in p:
+        b.rotation_mode = 'QUATERNION'
+    set_fingers(p)
+    pose(p, Key(0))
+    col = bpy.context.collection
+
+    def empty(name, m, parent=None, size=0.04, kind='ARROWS'):
+        e = bpy.data.objects.new(name, None)
+        col.objects.link(e)
+        e.empty_display_size, e.empty_display_type = size, kind
+        e.parent = parent
+        e.matrix_basis = m
+        return e
+
+    hand_h = empty('Hand', HAND_T, size=0.05)
+    fore_h = empty('Forearm', FORE_T, size=0.09, kind='SINGLE_ARROW')
+    knife_h = empty('Knife', Matrix.Translation(RING_HAND), hand_h, size=0.035, kind='CUBE')
+    knife_h['ring'] = list(RING_HAND)
+    knife_h['adj'] = [c for row in KNIFE_ADJ for c in row]
+    for h in (hand_h, fore_h, knife_h):
+        h.show_name = h.show_in_front = True
+    fore_h.constraints.new('COPY_LOCATION').target = hand_h  # the forearm only turns; it always meets the wrist
+
+    def follow(bone, parent, local):
+        helper = empty('_' + bone, local, parent, size=0.001)
+        helper.hide_select = helper.hide_viewport = True
+        p[bone].constraints.new('COPY_TRANSFORMS').target = helper
+
+    rest = lambda n: bones[n].matrix_local
+    follow('Hand_1.R', hand_h, HAND0.inverted() @ rest('Hand_1.R'))
+    follow('Arm_2.R', fore_h, FORE0.inverted() @ rest('Arm_2.R'))
+    follow('Arm_1.R', fore_h, FORE_T.inverted() @ UPPER_T @ UPPER0.inverted() @ rest('Arm_1.R'))
+    follow('knife', knife_h, Matrix.Translation(-RING_HAND) @ HAND0.inverted() @ rest('knife'))
+    for o in (arm, mesh, knife):
+        o.hide_select = True  # only the handles can be clicked
+
+    # The game's view: viewmodel FOV is horizontal at 4:3.
+    fov = math.radians(90 if RETRO else 68)
+    cam = bpy.data.cameras.new('Game view')
+    cam.sensor_fit = 'VERTICAL'
+    cam.angle_y = 2 * math.atan(math.tan(fov / 2) * 0.75)
+    cam.clip_start = 0.01
+    co = bpy.data.objects.new('Game view', cam)
+    col.objects.link(co)
+    co.rotation_euler = (math.pi / 2, 0, 0)
+    co.hide_select = True
+    sc = bpy.context.scene
+    sc.camera = co
+    sc.render.resolution_x, sc.render.resolution_y = 1920, 1080
+    for screen in bpy.data.screens:
+        for area in screen.areas:
+            if area.type == 'VIEW_3D':
+                s = area.spaces.active
+                s.shading.type = 'MATERIAL'
+                s.overlay.show_floor = s.overlay.show_axis_x = s.overlay.show_axis_y = False
+                s.region_3d.view_perspective = 'CAMERA'
+    for img in bpy.data.images:
+        if img.size[0]:
+            img.pack()
+    os.makedirs(os.path.join(ROOT, 'align'), exist_ok=True)
+    path = os.path.join(ROOT, 'align', NAME + '.blend')
+    bpy.ops.wm.save_as_mainfile(filepath=path, compress=True)
+    print('align file', path, os.path.getsize(path), flush=True)
+    os._exit(0)
+
 bpy.context.scene.render.fps = FPS  # the FBX import reset it
 def timed(keys, f):
     for k in keys:

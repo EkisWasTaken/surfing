@@ -136,6 +136,10 @@ npm run build     # type-check and production build
 
 To rebuild them, unzip the two downloads into `arms/` and `knife/` in one folder (and the knife's inner `.rar` in place), then run `scripts/blender/fit_viewmodel.py` in Blender with `MODELS` set to that folder. Add `VM_KNIFE=m9` for the M9 (unzipped into `m9/`), or `VM_SET=retro` for the Classic set.
 
+### Placing the hands and knife by eye
+
+Run `fit_viewmodel.py` with `VM_ALIGN=1` to write `align/<set>.blend`: the game's camera, the idle pose and three handles (`Hand`, `Forearm`, `Knife`). Move them and save, run `blender -b align/<set>.blend -P scripts/blender/read_align.py`, then rebuild the set. The hold lands in `scripts/blender/holds/`.
+
 ## Disclaimer
 
 This is a fan project. It isn't affiliated with or endorsed by Valve. Counter-Strike, CS:GO and CS2 are trademarks of Valve Corporation. The game ships no Valve assets; it only reads files from installs you own.
