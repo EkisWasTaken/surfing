@@ -158,7 +158,7 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
 
 // Chat and records: CS server-style lines for map changes and finishes.
 const gameName = () => gameLabel(settings.game);
-const mapShort = (m: MapDef) => (m.id.startsWith('bsp:') ? m.id.slice(4).replace(/\.bsp$/i, '') : m.name);
+const mapShort = (m: MapDef) => licensedMaps.find((l: { file: string }) => `bsp:${l.file}` === m.id)?.name ?? (m.id.startsWith('bsp:') ? m.id.slice(4).replace(/\.bsp$/i, '') : m.name);
 const player = () => settings.name.trim() || 'Player';
 const signed = (d: number) => `${d < 0 ? '-' : '+'}${formatTime(Math.abs(d))}`;
 const ordinal = (n: number) => `${n}${n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th'}`;
