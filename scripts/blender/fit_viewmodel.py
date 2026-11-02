@@ -185,13 +185,13 @@ WRIST = Vector((0.145, 0.300, -0.130)) if RETRO else Vector((0.172, 0.425, -0.12
 # Little finger side. Modern: down, a hammer grip with the blade below the fist. Classic: down and back, so the straight blade points up and forward.
 HAND_X = Vector((0.16, -0.46, -0.87)) if UPRIGHT else Vector((-0.24, 0.52, -0.82))
 HAND_Y = Vector((-0.66, 0.72, -0.08)) if UPRIGHT else Vector((-0.62, 0.76, 0.18))  # knuckles close to in line with the forearm, turned to show the blade's flat
-FORE_DIR = Vector((-0.40, 0.84, 0.36)).normalized() if UPRIGHT else Vector((-0.34, 0.88, 0.33)).normalized()
+FORE_DIR = Vector((-0.60, 0.76, 0.24)).normalized() if UPRIGHT else Vector((-0.40, 0.85, 0.30)).normalized()  # within a few degrees of the hand: a straight wrist
 x, y = HAND_X.normalized(), HAND_Y.normalized()
 y = (y - x * y.dot(x)).normalized()
 HAND_T = Matrix((x, y, x.cross(y))).transposed().to_4x4()
 HAND_T.translation = WRIST
 ELBOW = WRIST - FORE_DIR * L_FORE
-FORE_T = frame(WRIST, FORE_DIR, HAND_T.col[2].to_3d() * 0.5 + Vector((0, 0, 0.5)))
+FORE_T = frame(WRIST, FORE_DIR, HAND_T.col[2].to_3d())  # turned with the hand, so the wrist does not twist
 UPPER_T = frame(ELBOW, (-0.25, 0.75, 0.55), (0, 0, 1))
 # Left arm: mirrored into the lower left, fingers relaxed.
 L_WRIST = Vector((0.33, 0.22, -0.36))  # out of view until something brings it up
