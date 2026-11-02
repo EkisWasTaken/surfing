@@ -6,6 +6,7 @@ import { step, newPlayer, Cmd, Player } from '../src/movement';
 import { config } from '../src/config';
 import { vec, scale, sub, dot } from '../src/math';
 import { createGrid } from '../src/grid';
+import { medalTimes, medalFor } from '../src/maps/build';
 import { simTick, newTickState } from '../src/sim';
 
 const { mins, maxs } = config.hullStand;
@@ -117,3 +118,15 @@ describe.each(maps.filter((m) => m.stages).map((m) => [m.name, m] as const))('st
   });
 });
 
+
+describe('medals', () => {
+  it('gets harder to earn with a faster time, and imported maps have none', () => {
+    const m = findMap('warmup'), t = medalTimes(m);
+    expect(t.gold).toBeLessThan(t.silver);
+    expect(t.silver).toBeLessThan(t.bronze);
+    expect(medalFor(m, t.gold)).toBe('Gold');
+    expect(medalFor(m, t.silver)).toBe('Silver');
+    expect(medalFor(m, t.bronze)).toBe('Bronze');
+    expect(medalFor(m, t.bronze + 1)).toBeNull();
+  });
+});

@@ -275,6 +275,8 @@ function propMeshes(props: BspMap['props'], pak: Map<string, Uint8Array>, materi
   return out;
 }
 
+const BOOST_MAT = new THREE.MeshBasicMaterial({ color: 0xffc14d, transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending });
+
 // Non-solid landscape around a built-in map, so speed has something to read against: shapes rising from a ground far
 // below, kept clear of the course. Seeded, so a map always looks the same.
 function sceneryGeometry(brushes: Brush[], killZ: number, kind: Theme['scenery']) {
@@ -329,26 +331,29 @@ export function createRenderer(canvas: HTMLCanvasElement) {
   let lightmap: THREE.DataTexture | null = null;
   const world = new THREE.Group();
   scene.add(world);
-  let hfov = 90;
+  let hfov = 90, fovKick = 0;
 
   const viewmodel = createViewmodel(renderer);
   // Ghost of your best run: a see-through player-sized capsule (32 wide, 72 tall, like the hull).
   const ghost = new THREE.Mesh(new THREE.CapsuleGeometry(16, 40, 4, 12), new THREE.MeshBasicMaterial({ color: 0x9fd4ff, transparent: true, opacity: 0.35, depthWrite: false }));
   ghost.visible = false;
   scene.add(ghost);
+  const rival = ghost.clone();
+  rival.material = new THREE.MeshBasicMaterial({ color: 0xffb347, transparent: true, opacity: 0.45, depthWrite: false });
+  scene.add(rival);
   renderer.autoClear = false; // world, then the knife on top with only depth cleared
   const resize = () => {
     renderer.setSize(window.innerWidth, window.innerHeight, false);
     camera.aspect = window.innerWidth / window.innerHeight;
     viewmodel.resize(camera.aspect);
     // CS:GO fov is horizontal at 4:3; wider screens see more to the sides.
-    camera.fov = 2 * Math.atan(Math.tan((hfov * DEG) / 2) * 0.75) / DEG;
+    camera.fov = 2 * Math.atan(Math.tan(((hfov + fovKick) * DEG) / 2) * 0.75) / DEG;
     camera.updateProjectionMatrix();
   };
   resize();
 
   return {
-    setMap(map: { theme?: Theme; killZ: number; brushes: Brush[]; mesh?: BspMap['mesh']; pak?: BspMap['pak']; props?: BspMap['props']; lightmap?: BspMap['lightmap']; skyName?: string; fog?: BspMap['fog'] }) {
+    setMap(map: { theme?: Theme; pushes?: { brushes: Brush[] }[]; killZ: number; brushes: Brush[]; mesh?: BspMap['mesh']; pak?: BspMap['pak']; props?: BspMap['props']; lightmap?: BspMap['lightmap']; skyName?: string; fog?: BspMap['fog'] }) {
       const geometries = new Set<THREE.BufferGeometry>();
       world.traverse((o) => o instanceof THREE.Mesh && geometries.add(o.geometry));
       geometries.forEach((g) => g.dispose());
@@ -398,6 +403,7 @@ export function createRenderer(canvas: HTMLCanvasElement) {
         return { ...src.stats(), s3tc };
       }
       world.add(new THREE.Mesh(sceneryGeometry(map.brushes, map.killZ, theme.scenery), floorMat));
+      for (const q of map.pushes ?? []) for (const b of q.brushes) world.add(new THREE.Mesh(boxGeometry(b), BOOST_MAT)); // boost pads show as a glow
       for (const b of map.brushes) world.add(new THREE.Mesh(b.kind === 'ramp' ? rampGeometry(b) : boxGeometry(b), b.kind === 'ramp' ? rampMat : floorMat));
       return null;
     },
@@ -410,6 +416,16 @@ export function createRenderer(canvas: HTMLCanvasElement) {
     setOwn: (...a: Parameters<typeof viewmodel.setOwn>) => viewmodel.setOwn(...a),
     setShowViewmodel: (show: boolean) => (showViewmodel = show),
     setArms: (b: Parameters<typeof viewmodel.setArms>[0]) => viewmodel.setArms(b, renderer.extensions.has('EXT_texture_compression_bptc')),
+    setRival(pos: Vec3 | null) {
+      rival.visible = !!pos;
+      if (pos) rival.position.copy(toThree(pos)).add(new THREE.Vector3(0, 36, 0));
+    },
+    // Extra field of view at speed, added on top of the player's own.
+    setFovKick(k: number) {
+      if (Math.abs(k - fovKick) < 0.02) return;
+      fovKick = k;
+      resize();
+    },
     setGhost(pos: Vec3 | null) {
       ghost.visible = !!pos;
       if (pos) ghost.position.copy(toThree(pos)).add(new THREE.Vector3(0, 36, 0));

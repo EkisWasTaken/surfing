@@ -32,3 +32,10 @@ describe('jumpBind', () => {
     expect(parseSettings('{"seed":12.4}').seed).toBe(12);
   });
 });
+
+describe('key binds', () => {
+  it('keeps good codes and falls back on junk, per key', () => {
+    const k = parseSettings(JSON.stringify({ keys: { forward: 'KeyZ', back: '<x>', left: 'Escape' } })).keys;
+    expect(k).toEqual({ ...defaults.keys, forward: 'KeyZ' });
+  });
+});

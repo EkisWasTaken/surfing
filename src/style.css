@@ -246,3 +246,14 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #2a2f25; }
 .finishDetail.good { color: #9be58f; }
 .finishDetail.bad { color: #ffb19e; }
 .finishKeys { margin: 8px 0 0; font-size: 13px; font-weight: 700; white-space: pre-wrap; }
+
+/* ---------- Later additions ---------- */
+.speedVal[data-tier="1"] { color: #ffe08a; }
+.speedVal[data-tier="2"] { color: #ffb347; }
+.speedVal[data-tier="3"] { color: #ff7a5c; }
+.hudbar, .chat, .flash, .finishPanel { zoom: var(--hud-scale, 1); }
+.mapCard { grid-template-columns: 26px 1fr auto 130px; }
+.shareBox { margin-top: 10px; }
+.shareRow { display: flex; gap: 8px; margin-top: 6px; }
+.shareInput { flex: 1; min-width: 0; color: var(--text); background: var(--well); padding: 4px 6px; border: 1px solid; border-color: var(--dark) var(--light) var(--light) var(--dark); font: inherit; }
+.overlay, .start { align-items: safe center; } /* a tall menu scrolls instead of losing its top */

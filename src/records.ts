@@ -4,7 +4,7 @@ import type { Run } from './timer';
 
 export const RECENT = 10; // finishes kept per map, newest first
 export type Finish = { time: number; at: number }; // at: epoch ms
-export type MapRecord = { best: number; bestAt: number; finishes: number; recent: Finish[] };
+export type MapRecord = { best: number; bestAt: number; finishes: number; recent: Finish[]; splits?: number[] }; // splits: stage times of the best run
 export type Records = Record<string, MapRecord>;
 // first: no earlier finish; pb: beat the best; slower: didn't. delta = time - previous best; rank among recent finishes.
 export type FinishResult = { all: Records; record: MapRecord; kind: 'first' | 'pb' | 'slower'; delta: number; rank: number };
@@ -20,11 +20,11 @@ export function finishKind(was: Run['phase'], now: Run['phase'], practice: boole
   return practice ? 'practice' : serverChanged ? 'settings' : 'record';
 }
 
-export function recordFinish(all: Records, game: Track, mapId: string, time: number, now: number): FinishResult {
+export function recordFinish(all: Records, game: Track, mapId: string, time: number, now: number, splits?: number[]): FinishResult {
   const key = recordKey(game, mapId), prev = all[key];
   const recent = [{ time, at: now }, ...(prev?.recent ?? [])].slice(0, RECENT);
   const pb = !prev || time < prev.best;
-  const record: MapRecord = { best: pb ? time : prev.best, bestAt: pb ? now : prev.bestAt, finishes: (prev?.finishes ?? 0) + 1, recent };
+  const record: MapRecord = { best: pb ? time : prev.best, bestAt: pb ? now : prev.bestAt, finishes: (prev?.finishes ?? 0) + 1, recent, splits: pb ? splits : prev.splits };
   return {
     all: { ...all, [key]: record },
     record,
@@ -52,7 +52,7 @@ export function parseRecords(raw: string | null, legacy: string | null): Records
     const r = v as Partial<MapRecord>;
     if (!/^(csgo|csgo128|cs16):/.test(k) || !r || !pos(r.best)) continue;
     const recent = Array.isArray(r.recent) ? r.recent.filter((f) => f && pos(f.time) && typeof f.at === 'number').slice(0, RECENT) : [];
-    out[k] = { best: r.best, bestAt: typeof r.bestAt === 'number' ? r.bestAt : 0, finishes: pos(r.finishes) ? Math.floor(r.finishes) : Math.max(1, recent.length), recent };
+    out[k] = { splits: Array.isArray(r.splits) && r.splits.every(pos) ? r.splits : undefined, best: r.best, bestAt: typeof r.bestAt === 'number' ? r.bestAt : 0, finishes: pos(r.finishes) ? Math.floor(r.finishes) : Math.max(1, recent.length), recent };
   }
   for (const [map, t] of Object.entries(read(legacy))) {
     const key = recordKey('csgo', map);

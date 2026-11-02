@@ -68,3 +68,15 @@ describe('recordTrack', () => {
     expect(parseRecords(JSON.stringify(all), null)[recordKey('csgo128', 'm')].best).toBe(50); // survives a reload
   });
 });
+
+describe('stage splits', () => {
+  it('keeps the splits of the best run only', () => {
+    let all = recordFinish({}, 'csgo', 'm', 60, 1, [20, 40]).all;
+    all = recordFinish(all, 'csgo', 'm', 70, 2, [25, 50]).all;
+    expect(all[recordKey('csgo', 'm')].splits).toEqual([20, 40]);
+    all = recordFinish(all, 'csgo', 'm', 50, 3, [15, 30]).all;
+    expect(all[recordKey('csgo', 'm')].splits).toEqual([15, 30]);
+    expect(parseRecords(JSON.stringify(all), null)[recordKey('csgo', 'm')].splits).toEqual([15, 30]);
+    expect(parseRecords(JSON.stringify({ 'csgo:m': { best: 5, splits: ['x'] } }), null)['csgo:m'].splits).toBeUndefined();
+  });
+});

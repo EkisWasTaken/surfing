@@ -60,7 +60,7 @@ export type StageSpec = { topZ: number; length: number; gap: number; drop: numbe
 // A map in stages: each is a platform, a ramp chain and a landing pad. Touching the pad moves you on to the next
 // stage standing still; the last pad is the finish. Falling returns you to the stage you're on.
 export function stagedMap(id: string, name: string, theme: Theme, specs: StageSpec[]): MapDef {
-  const brushes: Brush[] = [], teleports: Teleport[] = [], stages: NonNullable<MapDef['stages']> = [], stageEnds: number[] = [];
+  const pushes: Push[] = [], brushes: Brush[] = [], teleports: Teleport[] = [], stages: NonNullable<MapDef['stages']> = [], stageEnds: number[] = [];
   let endZone: Brush[] = [], lowest = Infinity, rampCount = 0;
   specs.forEach((s, i) => {
     const y = i * LANE, at = vec(0, y, 0);
@@ -72,11 +72,12 @@ export function stagedMap(id: string, name: string, theme: Theme, specs: StageSp
     lowest = Math.min(lowest, low);
     rampCount += ramps.length;
     stageEnds.push(rampCount - 1);
+    if (i > 0) pushes.push({ brushes: [translated(makeBox(vec(130, -256, s.topZ), vec(256, 256, s.topZ + 48)), at)], vel: vec(620, 0, 120), once: true }); // no standing start on a later stage
     if (i === specs.length - 1) endZone = [zone];
     else teleports.push({ brushes: [zone], dest: vec(0, y + LANE, specs[i + 1].topZ + 1), yaw: 0, landmark: null, keepAngles: false, stop: true, stage: i + 1 });
   });
   const top = specs[0].topZ;
-  return { id, name, theme, stages, stageEnds, brushes, spawn: stages[0].spawn, spawnYaw: 0, killZ: lowest - 800, startZone: [makeBox(vec(-256, -256, top), vec(256, 256, top + 128))], endZone, teleports, pushes: [], hurts: [] };
+  return { id, name, theme, stages, stageEnds, brushes, spawn: stages[0].spawn, spawnYaw: 0, killZ: lowest - 800, startZone: [makeBox(vec(-256, -256, top), vec(256, 256, top + 128))], endZone, teleports, pushes, hurts: [] };
 }
 
 // Built-in map: spawn on the start platform (timer starts on leaving it), goal is the landing pad.
@@ -96,4 +97,15 @@ export function builtin(id: string, name: string, theme: Theme, topZ: number, ra
     pushes: [],
     hurts: [],
   };
+}
+
+// Medal targets from the course length at a typical speed for each medal. shortcut: estimates, not times from real runs; set them by hand once maps have been played.
+export function medalTimes(map: MapDef) {
+  const length = map.brushes.filter((b) => b.kind === 'ramp').reduce((sum, b) => sum + Math.max(b.maxs.x - b.mins.x, b.maxs.y - b.mins.y), 0) * 1.2;
+  return { gold: length / 1500, silver: length / 1150, bronze: length / 850 };
+}
+export function medalFor(map: MapDef, time: number): 'Gold' | 'Silver' | 'Bronze' | null {
+  if (map.mesh) return null; // imported maps have no targets
+  const m = medalTimes(map);
+  return time <= m.gold ? 'Gold' : time <= m.silver ? 'Silver' : time <= m.bronze ? 'Bronze' : null;
 }

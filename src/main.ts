@@ -4,15 +4,16 @@ import karambitModel from './assets/viewmodel/karambit.glb?url';
 import m9Model from './assets/viewmodel/m9.glb?url';
 import retroModel from './assets/viewmodel/retro.glb?url';
 import { HOSTED, OWN_MODELS, gameLabel, gameTitle, parseGame } from './hosted';
-import { config } from './config';
-import { vec, add, sub, scale } from './math';
+import { config, modeDefault } from './config';
+import { vec, add, sub, scale, angleVectors, normalize } from './math';
 import { maps as builtins, findMap } from './maps';
+import { medalFor } from './maps/build';
 import type { MapDef } from './maps';
 import { bspToMap, goalBox, saveGoal } from './maps/imported';
 import { parseBsp } from './bsp';
 import { readZip } from './pak';
-import { meshFromJson, unb64, vtexFromJson, VtexJson } from './cs2model';
-import { parseMdl } from './goldsrcmdl';
+import type { VtexJson } from './cs2model';
+import { unb64 } from './b64';
 import { createGrid } from './grid';
 import { newPlayer, unstick, Player } from './movement';
 import { simTick, touching, newTickState } from './sim';
@@ -23,10 +24,8 @@ import { createRenderer } from './render';
 import { createHud } from './hud';
 import { newRun, tickRun, formatTime, Run } from './timer';
 import { loadRecords, saveRecords, recordFinish, recordKey, recordTrack, finishKind, FinishResult } from './records';
-import { ghostFromTicks, sampleGhost, loadGhost, saveGhost, Ghost } from './ghost';
+import { ghostFromTicks, sampleGhost, ghostSeconds, loadGhost, saveGhost, encodeShare, decodeShare, Ghost, Shared } from './ghost';
 import { createConsole, keyName, Print } from './console';
-import { modeDefault } from './config';
-import { angleVectors, normalize } from './math';
 import { Settings, loadSettings, saveSettings, applySettings } from './settings';
 
 // three.js needs WebGL 2. Without it the game can't start, so say so rather than leave a blank page.
@@ -60,6 +59,10 @@ let noclip = false; // console noclip: fly through walls (practice)
 let showFps = false;
 let stageNow = 0; // the stage a fall returns you to
 let finishShown = false;
+let splits: number[] = []; // stage times of the current run
+let rival: Shared | null = null; // a friend's run being raced, for this map
+let replayStart = -1; // watching your best run: when it started
+let fovKick = 0;
 const runTrack = () => recordTrack(settings.game, settings.tickrate);
 const best = () => records[recordKey(runTrack(), map.id)]?.best ?? null; // per game and tick rate: their times aren't comparable
 let simState = newTickState(); // once-pushes, health and hurt timing carried between ticks
@@ -69,6 +72,7 @@ let lastTickYaw = 0; // yaw the previous tick used, for spreading mouse turn acr
 
 function respawn() {
   stageNow = 0;
+  splits = [];
   if (finishShown) (hud.showFinish(null), (finishShown = false));
   prev = cur = newPlayer(map.spawn);
   simState = newTickState();
@@ -81,6 +85,7 @@ function respawn() {
 
 function useMap(m: MapDef) {
   map = m;
+  if (rival && rival.map !== m.id) rival = null;
   grid = createGrid(m.brushes);
   m.spawn = unstick(m.spawn, m.brushes);
   const textures = renderer.setMap(m);
@@ -104,6 +109,7 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
     saveSettings(next);
     renderer.setShowViewmodel(next.showViewmodel);
     input.setJumpBind(next.jumpBind);
+    input.setKeys(next.keys);
     renderer.setFov(next.fov);
     if (tickChanged) acc = createAccumulator(1 / config.tickrate);
     if (gameChanged) renderer.setGame(next.game);
@@ -111,6 +117,7 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
     if (tickChanged) ghost = loadGhost(runTrack(), map.id);
     if (tickChanged && !mapChanged) respawn(); // hulls and rules differ: start the run over under the new ones
     if (tickChanged && !mapChanged) (announceMap(), refreshRecords());
+    if (gameChanged || (tickChanged && rival && rival.track !== runTrack())) rival = null;
     if (knifeChanged) (OWN_MODELS ? loadOwnKnife : loadKnife)(next.knife);
     else if (finishChanged) applyFinish();
     if (!mapChanged) return;
@@ -119,6 +126,27 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
     else if (next.map.startsWith('bsp:')) loadFolderMap(next.map.slice(4));
     else (useMap(maps[0]), announceMap(), refreshRecords());
   },
+  onShareCopy: async () => {
+    const r = records[recordKey(runTrack(), map.id)];
+    if (!r || !ghost) return hud.setShareNote('Set a record on this map first.');
+    const code = await encodeShare({ map: map.id, track: runTrack(), name: player(), time: r.best, ghost });
+    try {
+      await navigator.clipboard.writeText(code);
+      hud.setShareNote(`Code copied (${Math.ceil(code.length / 1000)} KB of text). Send it to a friend.`);
+    } catch {
+      hud.setShareNote('Your browser blocked copying.');
+    }
+  },
+  onShareLoad: async (code: string) => {
+    const s = await decodeShare(code);
+    if (!s) return hud.setShareNote("That isn't a valid code.");
+    const target = maps.find((m) => m.id === s.map);
+    if (!target) return hud.setShareNote(`That run is on a map you don't have: ${s.map.replace(/^bsp:/, '')}`);
+    if (s.map !== map.id) hud.apply({ map: s.map });
+    rival = s;
+    hud.setShareNote(`Racing ${s.name}: ${formatTime(s.time)} on ${target.name}. The orange ghost is theirs.`);
+  },
+  onReplay: () => startReplay(),
   onLoadFile: async (file: File) => {
     showLoading(file.name, 'Reading map file…', 0.3);
     return loadBsp(() => file.arrayBuffer(), file.name);
@@ -156,13 +184,16 @@ const surf = (...parts: { text: string; tone?: 'good' | 'bad' }[]) => hud.chat([
 // Checkpoints (surf servers' saveloc): position, view and speed. Teleporting to one makes the run practice.
 const checkpoints: { pos: Player['pos']; vel: Player['vel']; yaw: number; pitch: number; ducked: boolean }[] = [];
 let checkpointCount = 0;
+let checkpointBack = 0; // how far key 3 has stepped back
 function saveCheckpoint() {
+  checkpointBack = 0;
   checkpoints.push({ pos: { ...cur.pos }, vel: { ...cur.vel }, ...input.view(), ducked: cur.ducked });
   if (checkpoints.length > 10) checkpoints.shift();
   surf({ text: `Checkpoint ${++checkpointCount} saved. Press 2 (or !tele) to go back to it.` });
 }
-function teleportCheckpoint() {
-  const c = checkpoints.at(-1);
+function teleportCheckpoint(back = 0) {
+  checkpointBack = back;
+  const c = checkpoints.at(-1 - back);
   if (!c) return surf({ text: 'No checkpoint yet: press 1 (or !cp) to save one.', tone: 'bad' });
   prev = cur = { ...newPlayer(c.pos), vel: { ...c.vel }, ducked: c.ducked };
   simState = newTickState();
@@ -170,6 +201,7 @@ function teleportCheckpoint() {
   lastTickYaw = c.yaw;
   if (!practice && run.phase === 'running') surf({ text: "Practice mode: this run won't count as a record. Go back to the start (R) for a real run.", tone: 'bad' });
   practice = true;
+  surf({ text: `Checkpoint ${checkpoints.length - back} of ${checkpoints.length} at ${Math.round(Math.hypot(c.vel.x, c.vel.y))} u/s` });
 }
 
 // Chat: Y opens the say line. "!command" shows in chat and runs; "/command" runs silently, as on CS servers.
@@ -289,6 +321,7 @@ con.command('say', 'Chat: say <text>', (a) => a.length && onSay(a.join(' ')));
 con.command('clear', 'Clear the console', () => hud.consoleClear());
 con.command('toggleconsole', 'Open or close the console', () => (hud.consoleOpen() ? hud.closeConsole() : openConsole()));
 con.command('sv_defaults', 'Reset all sv_ settings', (_, p) => {
+  if (run.phase === 'running' && serverChanged()) practice = true;
   for (const k of SERVER_KEYS) (config as Record<string, unknown>)[k] = modeDefault(settings.game, k);
   p(`Server settings restored to ${gameName()} defaults.`);
 });
@@ -304,6 +337,7 @@ for (const [name, key] of Object.entries(SERVER))
     def: () => String(modeDefault(settings.game, key)),
     set: num(0, 100000, (n) => {
       config[key] = n;
+      if (run.phase === 'running') practice = true; // restoring it before the finish doesn't clean the run
       if (serverChanged()) conPrint("Server settings now differ from the defaults: runs won't be saved as records (sv_defaults restores them).", 'dim');
     }),
   });
@@ -396,7 +430,10 @@ function refreshRecords() {
   const prefix = `${runTrack()}:`;
   const rows = Object.entries(records)
     .filter(([k]) => k.startsWith(prefix))
-    .map(([k, r]) => ({ mapId: k.slice(prefix.length), best: r.best, finishes: r.finishes, bestAt: r.bestAt }))
+    .map(([k, r]) => {
+      const m = maps.find((x) => x.id === k.slice(prefix.length));
+      return { mapId: k.slice(prefix.length), best: r.best, finishes: r.finishes, bestAt: r.bestAt, medal: m ? medalFor(m, r.best) : null };
+    })
     .sort((a, b) => b.bestAt - a.bestAt);
   hud.setRecords(`${gameName()}${runTrack() === 'csgo128' ? ' 128-tick' : ''}`, rows, map.id, records[recordKey(runTrack(), map.id)]?.recent ?? []);
 }
@@ -486,10 +523,11 @@ type Any = any;
 let knives: { id: string; name: string; finishes: string[] }[] = [];
 const finishNames: Record<string, string> = {};
 type TrackJson = { frames: number; duration: number; poses: string };
+const cs2 = () => import('./cs2model');
 const track = (c: TrackJson) => ({ ...c, poses: new Float32Array(unb64(c.poses).buffer) });
 function loadKnife(id: string) {
-  json(`/cs2/knives/${id}.json`)
-    .then((j) => {
+  Promise.all([json(`/cs2/knives/${id}.json`), cs2()])
+    .then(([j, { meshFromJson, vtexFromJson }]) => {
       if (!j || settings.knife !== id) return; // a newer pick won the race
       const clips = Object.fromEntries(Object.entries(j.clips as Record<string, TrackJson & { knife: TrackJson | null }>).map(([k, c]) => [k, { ...track(c), knife: c.knife && track(c.knife) }]));
       const p = j.paint;
@@ -510,8 +548,8 @@ function applyFinish() {
   const want = settings.finish, offered = knives.find((k) => k.id === settings.knife)?.finishes ?? [];
   if (!want || !offered.includes(want)) return void renderer.setFinish(null);
   Promise.all([
-    cached(`/cs2/finishes/${want}.json`, (j) => ({ ...j, pattern: j.pattern && vtexFromJson(j.pattern) })),
-    cached('/cs2/finishes/shared.json', (j) => ({ wear: j.wear && vtexFromJson(j.wear as VtexJson), grunge: j.grunge && vtexFromJson(j.grunge as VtexJson) })),
+    cached(`/cs2/finishes/${want}.json`, async (j) => ({ ...j, pattern: j.pattern && (await cs2()).vtexFromJson(j.pattern) })),
+    cached('/cs2/finishes/shared.json', async (j) => { const { vtexFromJson } = await cs2(); return { wear: j.wear && vtexFromJson(j.wear as VtexJson), grunge: j.grunge && vtexFromJson(j.grunge as VtexJson) }; }),
   ])
     .then(([finish, shared]) => {
       if (settings.finish !== want || !finish || !shared) return; // a newer pick won the race, or the file is gone
@@ -528,7 +566,10 @@ const OWN_KNIVES = [{ id: 'knife_karambit', name: 'Karambit', url: karambitModel
 const ownKnifeLoads = new Map<string, Promise<GLTF>>(); // each knife is loaded once and kept, so switching back costs nothing
 function loadOwnKnife(id: string) {
   const k = OWN_KNIVES.find((x) => x.id === id) ?? OWN_KNIVES[0];
-  if (!ownKnifeLoads.has(k.id)) ownKnifeLoads.set(k.id, gltf.loadAsync(k.url));
+  if (!ownKnifeLoads.has(k.id)) {
+    hud.flash(`Loading ${k.name}…`);
+    ownKnifeLoads.set(k.id, gltf.loadAsync(k.url));
+  }
   ownKnifeLoads.get(k.id)!.then((g) => {
     if (OWN_MODELS && (OWN_KNIVES.find((x) => x.id === settings.knife) ?? OWN_KNIVES[0]) !== k) return; // a newer pick won the race
     renderer.setOwn('csgo', g.scene, g.animations);
@@ -555,10 +596,10 @@ if (settings.game === 'cs16') loadClassic();
 if (!OWN_MODELS) {
 fetch('/cs16/v_knife.mdl')
   .then((r) => (r.ok && !r.headers.get('content-type')?.includes('html') ? r.arrayBuffer() : null))
-  .then((b) => b && renderer.setKnife16(parseMdl(b)))
+  .then(async (b) => b && renderer.setKnife16((await import('./goldsrcmdl')).parseMdl(b)))
   .catch((e) => console.warn('CS 1.6 knife:', e));
 json('/cs2/viewmodel.json')
-  .then((j) => j && renderer.setArms({ skeleton: j.skeleton, arms: meshFromJson(j.arms) }))
+  .then(async (j) => j && renderer.setArms({ skeleton: j.skeleton, arms: (await cs2()).meshFromJson(j.arms) }))
   .catch((e) => console.warn('viewmodel arms:', e));
 json('/cs2/finishes/index.json')
   .then((names) => names && Object.assign(finishNames, names))
@@ -582,6 +623,27 @@ fetch('/maps/index.json')
   .catch(() => {}); // no dev server endpoint: built-in maps and file loading still work
 }
 
+input.onLockRefused(() => hud.flash('Your browser needs a moment. Click Play again.'));
+input.setKeys(settings.keys);
+
+// Watch your best run from behind. Any key ends it.
+function startReplay() {
+  if (!ghost) return hud.setShareNote('Set a record on this map first.');
+  if (input.locked()) document.exitPointerLock();
+  hud.showOverlay(false);
+  hud.showStart(false);
+  hud.showResume(false);
+  if (finishShown) (hud.showFinish(null), (finishShown = false));
+  renderer.setShowViewmodel(false);
+  replayStart = performance.now();
+  surf({ text: 'Replay: press any key to stop.' });
+}
+function stopReplay() {
+  replayStart = -1;
+  renderer.setShowViewmodel(settings.showViewmodel);
+  renderer.setGhost(null);
+  hud.showOverlay(true);
+}
 // Esc closed the menu, but browsers don't hand the mouse back on Esc: the game waits for a click.
 let menuClosed = false;
 const showMenu = (open: boolean) => {
@@ -597,6 +659,10 @@ input.onLockChange((locked) => {
   held.clear();
 });
 window.addEventListener('keydown', (e) => {
+  if (replayStart >= 0) {
+    e.preventDefault();
+    return stopReplay();
+  }
   // In game, Esc is the browser's own: it releases the mouse and the menu opens. Out of game it toggles the menu.
   if (e.key === 'Escape' && !typing && !input.locked() && !e.repeat && !hud.startOpen()) {
     showMenu(menuClosed);
@@ -615,6 +681,7 @@ window.addEventListener('keydown', (e) => {
   }
   if (e.code === 'Digit1') saveCheckpoint();
   if (e.code === 'Digit2') teleportCheckpoint();
+  if (e.code === 'Digit3') teleportCheckpoint(Math.min(checkpointBack + 1, Math.max(0, checkpoints.length - 1)));
   if (e.code === 'KeyR') respawn();
   if (e.code === 'KeyN' && finishShown && nextMap()) hud.apply({ map: nextMap()!.id });
   if (e.code === 'KeyF') renderer.inspect(); // CS's inspect key
@@ -662,8 +729,11 @@ function tick(cmd: ReturnType<typeof input.cmd>, tickDt: number) {
   if (r) (cur = r.player), (simState = r.state);
   if (r?.teleport?.stage !== undefined && map.stages) {
     stageNow = r.teleport.stage;
-    surf({ text: `Stage ${stageNow + 1} of ${map.stages.length} at ${formatTime(run.time)}` });
-    hud.flash(`Stage ${stageNow + 1} of ${map.stages.length}`);
+    splits[stageNow - 1] = run.time;
+    const was = records[recordKey(runTrack(), map.id)]?.splits?.[stageNow - 1];
+    const vs = was === undefined ? '' : ` (${signed(run.time - was)})`;
+    surf({ text: `Stage ${stageNow + 1} of ${map.stages.length} at ${formatTime(run.time)}${vs}`, tone: was === undefined ? undefined : run.time < was ? 'good' : 'bad' });
+    hud.flash(`Stage ${stageNow + 1} of ${map.stages.length}${vs}`);
   }
   if (r?.teleport) {
     prev = cur;
@@ -689,14 +759,14 @@ function tick(cmd: ReturnType<typeof input.cmd>, tickDt: number) {
   const finish = finishKind(was, run.phase, practice, serverChanged());
   if (finish) {
     if (finish !== 'record') {
-      surf({ text: `Practice run: ${formatTime(run.time)}. ${finish === 'practice' ? 'Checkpoints or noclip were used' : 'Server settings differ from the defaults (sv_defaults restores them)'}, so it isn't saved.`, tone: 'bad' });
-      showFinish('Practice run', finish === 'practice' ? 'Checkpoints or noclip were used, so it isn\'t saved' : 'Server settings differ from the defaults, so it isn\'t saved', 'bad');
+      surf({ text: `Practice run: ${formatTime(run.time)}. ${finish === 'practice' ? 'Checkpoints, noclip or changed server settings were used' : 'Server settings differ from the defaults (sv_defaults restores them)'}, so it isn't saved.`, tone: 'bad' });
+      showFinish('Practice run', finish === 'practice' ? 'Checkpoints, noclip or changed server settings were used, so it isn\'t saved' : 'Server settings differ from the defaults, so it isn\'t saved', 'bad');
     } else {
-      const r = recordFinish(records, runTrack(), map.id, run.time, Date.now());
+      const r = recordFinish(records, runTrack(), map.id, run.time, Date.now(), splits.slice());
       records = r.all;
       saveRecords(records);
       announceFinish(r);
-      showFinish(r.kind === 'first' ? 'First record!' : r.kind === 'pb' ? 'New personal best!' : 'Finished', r.kind === 'first' ? '' : `${signed(r.delta)} vs your best`, r.kind === 'slower' ? 'bad' : 'good');
+      showFinish(r.kind === 'first' ? 'First record!' : r.kind === 'pb' ? 'New personal best!' : 'Finished', [r.kind === 'first' ? '' : `${signed(r.delta)} vs your best`, medalFor(map, run.time) ? `${medalFor(map, run.time)} medal` : '', rival ? `${signed(run.time - rival.time)} vs ${rival.name}` : ''].filter(Boolean).join('   '), r.kind === 'slower' ? 'bad' : 'good');
       refreshRecords();
       // A new best becomes the ghost you race next time.
       const g = r.kind !== 'slower' ? ghostFromTicks(recording, tickDt) : null;
@@ -735,13 +805,28 @@ function frame(now: number) {
   const { yaw, pitch } = input.view();
   pose = stepPose(pose, { speed: Math.hypot(cur.vel.x, cur.vel.y), onGround: cur.onGround, yawDelta: yaw - lastFrameView.yaw, pitchDelta: pitch - lastFrameView.pitch }, Math.min(dt, 0.1));
   lastFrameView = { yaw, pitch };
+  const speedNow = Math.hypot(cur.vel.x, cur.vel.y);
+  fovKick += ((settings.speedFx ? Math.min(1, Math.max(0, (speedNow - 700) / 2300)) * 9 : 0) - fovKick) * Math.min(1, dt * 4);
+  renderer.setFovKick(fovKick);
+  if (replayStart >= 0 && ghost) {
+    const t = (now - replayStart) / 1000, s = sampleGhost(ghost, t), f = angleVectors(s.yaw, 12).forward;
+    renderer.draw(add(s.pos, add(scale(f, -150), vec(0, 0, 80))), s.yaw, 12, pose);
+    hud.setSpeed(0);
+    hud.setTimer(formatTime(Math.min(t, ghostSeconds(ghost))), '', false);
+    renderer.setGhost(s.pos);
+    renderer.setRival(null);
+    if (t > ghostSeconds(ghost) + 1.5) stopReplay();
+    requestAnimationFrame(frame);
+    return;
+  }
   renderer.draw(add(a, scale(sub(b, a), acc.alpha())), yaw, pitch, pose);
-  hud.setSpeed(Math.hypot(cur.vel.x, cur.vel.y));
+  hud.setSpeed(speedNow);
   const pb = best();
   hud.setTimer(formatTime(run.time), pb === null ? '' : `PB ${formatTime(pb)}`, practice);
   // The ghost waits at the start, runs alongside yours in time, and parks at the finish.
   const gt = run.phase === 'running' ? run.time + acc.alpha() / config.tickrate : run.phase === 'finished' ? run.time : 0;
   renderer.setGhost(settings.showGhost && ghost ? sampleGhost(ghost, gt).pos : null);
+  renderer.setRival(rival ? sampleGhost(rival.ghost, gt).pos : null);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

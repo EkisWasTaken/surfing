@@ -1,5 +1,6 @@
 import { config } from './config';
 import type { Cmd } from './movement';
+import { defaults, KeyBinds } from './settings';
 
 const SPIKE = 500;
 const SPIKE_RATIO = 8;
@@ -34,9 +35,11 @@ export function createInput(canvas: HTMLCanvasElement) {
   let yaw = 0, pitch = 0;
   let filter = mouseFilter();
   let jumpBind = 'Space';
+  let binds: KeyBinds = defaults.keys;
   let jumpPulse = false; // wheel notches are instant, so they count as one tick of jump
   let typing = false; // chat open: keys are text, not movement
   const listeners: ((locked: boolean) => void)[] = [];
+  let onRefused = () => {};
   const locked = () => document.pointerLockElement === canvas;
 
   const requestLock = () => {
@@ -53,7 +56,10 @@ export function createInput(canvas: HTMLCanvasElement) {
     if (!locked()) keys.clear(); // keys released while unlocked never reach us
     listeners.forEach((cb) => cb(locked()));
   });
-  document.addEventListener('pointerlockerror', () => listeners.forEach((cb) => cb(false)));
+  document.addEventListener('pointerlockerror', () => {
+    listeners.forEach((cb) => cb(false));
+    onRefused();
+  });
   document.addEventListener('mousemove', (e) => {
     if (!locked()) return;
     const [dx, dy] = filter(e.movementX, e.movementY);
@@ -77,12 +83,12 @@ export function createInput(canvas: HTMLCanvasElement) {
       const jump = keys.has(jumpBind) || jumpPulse;
       jumpPulse = false;
       return {
-        forward: k('KeyW') - k('KeyS'),
-        side: k('KeyD') - k('KeyA'),
+        forward: k(binds.forward) - k(binds.back),
+        side: k(binds.right) - k(binds.left),
         jump,
         // Not Ctrl: Ctrl+W closes the tab and can't be blocked.
-        duck: keys.has('KeyC'),
-        walk: keys.has('ShiftLeft') || keys.has('ShiftRight'), // CS:GO: shift walks
+        duck: keys.has(binds.duck),
+        walk: keys.has(binds.walk) || (binds.walk === 'ShiftLeft' && keys.has('ShiftRight')), // CS:GO: shift walks
         yaw,
         pitch,
       };
@@ -92,12 +98,16 @@ export function createInput(canvas: HTMLCanvasElement) {
       typing = on;
       keys.clear(); // whatever was held when chat opened is released
     },
+    setKeys(b: KeyBinds) {
+      binds = b;
+    },
     setJumpBind(b: string) {
       jumpBind = b;
     },
     locked,
     requestLock,
     onLockChange: (cb: (locked: boolean) => void) => listeners.push(cb),
+    onLockRefused: (cb: () => void) => (onRefused = cb), // browsers refuse the mouse for a moment after Esc
     setView(y: number, p: number) {
       yaw = y;
       pitch = p;

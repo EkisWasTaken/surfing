@@ -1,8 +1,9 @@
 import { config, setGameMode, GameMode } from './config';
 
-export type Settings = { name: string; game: GameMode; sensitivity: number; fov: number; tickrate: 64 | 128; autobhop: boolean; showSpeed: boolean; map: string; jumpBind: string; showGhost: boolean; showViewmodel: boolean; knife: string; finish: string; wear: number; seed: number };
+export type KeyBinds = { forward: string; back: string; left: string; right: string; walk: string; duck: string };
+export type Settings = { name: string; game: GameMode; sensitivity: number; fov: number; tickrate: 64 | 128; autobhop: boolean; showSpeed: boolean; map: string; jumpBind: string; showGhost: boolean; showViewmodel: boolean; speedFx: boolean; hudScale: number; keys: KeyBinds; knife: string; finish: string; wear: number; seed: number };
 
-export const defaults: Settings = { name: 'Player', game: 'csgo', sensitivity: 2, fov: 90, tickrate: 64, autobhop: true, showSpeed: true, map: 'warmup', jumpBind: 'Space', showGhost: true, showViewmodel: true, knife: 'knife_default_ct', finish: '', wear: 0.01, seed: 0 };
+export const defaults: Settings = { name: 'Player', game: 'csgo', sensitivity: 2, fov: 90, tickrate: 64, autobhop: true, showSpeed: true, map: 'warmup', jumpBind: 'Space', showGhost: true, showViewmodel: true, speedFx: true, hudScale: 1, keys: { forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD', walk: 'ShiftLeft', duck: 'KeyC' }, knife: 'knife_default_ct', finish: '', wear: 0.01, seed: 0 };
 
 const KEY = 'surf-settings';
 const num = (v: unknown, min: number, max: number, fallback: number) =>
@@ -29,6 +30,12 @@ export function parseSettings(raw: string | null): Settings {
     // A KeyboardEvent.code or WheelUp/WheelDown; Escape is reserved for the menu.
     showGhost: bool(o.showGhost, defaults.showGhost),
     showViewmodel: bool(o.showViewmodel, defaults.showViewmodel),
+    speedFx: bool(o.speedFx, defaults.speedFx),
+    hudScale: num(o.hudScale, 0.7, 1.6, defaults.hudScale),
+    keys: Object.fromEntries(Object.entries(defaults.keys).map(([k, d]) => {
+      const v = (o.keys as Record<string, unknown> | undefined)?.[k];
+      return [k, typeof v === 'string' && /^[A-Za-z0-9]{1,24}$/.test(v) && v !== 'Escape' ? v : d];
+    })) as KeyBinds,
     knife: typeof o.knife === 'string' && /^knife_[a-z0-9_]{1,32}$/.test(o.knife) ? o.knife : defaults.knife, // also a file name: keep it strict
     finish: typeof o.finish === 'string' && /^[a-z0-9_]{0,64}$/.test(o.finish) ? o.finish : defaults.finish, // '' = vanilla; also a file name
     wear: num(o.wear, 0, 1, defaults.wear),

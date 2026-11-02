@@ -5,6 +5,8 @@ import { MeshoptDecoder } from 'meshoptimizer';
 import { MeshoptDecoder as MeshoptReference } from 'meshoptimizer/meshopt_decoder_reference.js';
 import { parseKV3, resourceBlocks } from './kv3';
 import { readVtex, Vtex } from './cs2';
+import { b64, unb64 } from './b64';
+export { b64, unb64 };
 
 export type Cs2Mesh = {
   positions: Float32Array;
@@ -131,12 +133,6 @@ export async function readCs2Mesh(vmdl: Uint8Array, get: Get, only?: string[]): 
 }
 
 // Compact JSON form (typed arrays as base64) so the import step can hand meshes to the browser.
-export const b64 = (b: Uint8Array) => {
-  let s = '';
-  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
-  return btoa(s);
-};
-export const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 const bytesOf = (a: Float32Array | Uint32Array | Uint16Array) => new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
 
 export type VtexJson = { width: number; height: number; format: Vtex['format']; mips: { width: number; height: number; data: string }[] };

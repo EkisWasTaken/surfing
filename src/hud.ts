@@ -9,6 +9,9 @@ type HudOptions = {
   onChange: (s: Settings) => void;
   onPlay: () => void;
   onLoadFile: (file: File) => void;
+  onShareCopy: () => void;
+  onShareLoad: (code: string) => void;
+  onReplay: () => void;
 };
 
 // Small HUD glyphs, drawn in the HUD colour (currentColor).
@@ -19,7 +22,8 @@ const ICON = {
 };
 const TABS = [
   { id: 'map', name: 'Map' },
-  { id: 'movement', name: 'Movement' },
+  { id: 'movement', name: 'Game' },
+  { id: 'display', name: 'Display' },
   { id: 'knife', name: 'Knife' },
   { id: 'records', name: 'Records' },
   { id: 'controls', name: 'Controls' },
@@ -109,13 +113,19 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
             </label>
             <p class="note tickHint"></p>
             <label class="row"><span>Mouse sensitivity</span><input name="sensitivity" type="number" min="0.01" max="20" step="0.01" /></label>
+            <label class="row check"><input name="autobhop" type="checkbox" /><span>Jump again automatically while holding jump</span></label>
+          </div>
+          <div class="sheet" role="tabpanel" id="sheet-display" aria-labelledby="tab-display" hidden>
             <label class="row"><span>Field of view</span>
               <span class="slider"><input name="fov" type="range" min="60" max="130" step="1" /><output name="fovOut"></output></span>
             </label>
-            <label class="row check"><input name="autobhop" type="checkbox" /><span>Jump again automatically while holding jump</span></label>
+            <label class="row"><span>HUD size</span>
+              <span class="slider"><input name="hudScale" type="range" min="0.7" max="1.6" step="0.05" /><output name="hudScaleOut"></output></span>
+            </label>
             <label class="row check"><input name="showSpeed" type="checkbox" /><span>Show speed on the HUD</span></label>
             <label class="row check"><input name="showGhost" type="checkbox" /><span>Race a ghost of your best run</span></label>
             <label class="row check"><input name="showViewmodel" type="checkbox" /><span>Show arms and knife</span></label>
+            <label class="row check"><input name="speedFx" type="checkbox" /><span>Widen the view at high speed</span></label>
           </div>
           <div class="sheet" role="tabpanel" id="sheet-knife" aria-labelledby="tab-knife" hidden>
             <p class="note noKnives">Knives appear after running <code>npm run import-maps</code> with CS2 installed.</p>
@@ -135,6 +145,18 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
               <thead><tr><th scope="col">Map</th><th scope="col">Best</th><th scope="col">Finishes</th><th scope="col">Set on</th></tr></thead>
               <tbody></tbody>
             </table>
+            <div class="shareBox">
+              <p class="recentTitle">Race a friend</p>
+              <div class="shareRow">
+                <button type="button" class="button shareCopy">Copy my code for this map</button>
+                <button type="button" class="button replayBtn">Watch my best run</button>
+              </div>
+              <div class="shareRow">
+                <input class="shareInput" type="text" placeholder="Paste a friend's code" autocomplete="off" spellcheck="false" aria-label="Friend's code" />
+                <button type="button" class="button shareLoad">Race</button>
+              </div>
+              <p class="note shareNote" role="status"></p>
+            </div>
             <div class="recent" hidden>
               <p class="recentTitle"></p>
               <ol class="recentList"></ol>
@@ -144,10 +166,13 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
             <table class="keylist">
               <thead><tr><th scope="col">Action</th><th scope="col">Key</th></tr></thead>
               <tbody>
-                <tr><td>Move</td><td>W A S D</td></tr>
+                <tr><td>Forward</td><td><button type="button" class="bindBtn keyBind" data-key="forward" title="Click, then press a key"></button></td></tr>
+                <tr><td>Back</td><td><button type="button" class="bindBtn keyBind" data-key="back" title="Click, then press a key"></button></td></tr>
+                <tr><td>Left</td><td><button type="button" class="bindBtn keyBind" data-key="left" title="Click, then press a key"></button></td></tr>
+                <tr><td>Right</td><td><button type="button" class="bindBtn keyBind" data-key="right" title="Click, then press a key"></button></td></tr>
                 <tr><td>Jump</td><td><button type="button" class="bindBtn" title="Click, then press a key or scroll"></button></td></tr>
-                <tr><td>Walk</td><td>Shift</td></tr>
-                <tr><td>Crouch</td><td>C</td></tr>
+                <tr><td>Walk</td><td><button type="button" class="bindBtn keyBind" data-key="walk" title="Click, then press a key"></button></td></tr>
+                <tr><td>Crouch</td><td><button type="button" class="bindBtn keyBind" data-key="duck" title="Click, then press a key"></button></td></tr>
                 <tr><td>Slash</td><td>Left click</td></tr>
                 <tr><td>Stab</td><td>Right click</td></tr>
                 <tr class="cs2Only"><td>Inspect knife</td><td>F</td></tr>
@@ -155,6 +180,8 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
                 <tr><td>Restart run</td><td>R</td></tr>
                 <tr><td>Save checkpoint</td><td>1</td></tr>
                 <tr><td>Teleport to checkpoint (practice)</td><td>2</td></tr>
+                <tr><td>Step back to an earlier checkpoint</td><td>3</td></tr>
+                <tr><td>Next map, after finishing</td><td>N</td></tr>
                 <tr><td>Chat (type !help for commands)</td><td>Y</td></tr>
                 <tr><td>Console (kill, retry, map, bind, sv_ settings: type help)</td><td>&#96; (key under Esc)</td></tr>
                 <tr><td>Open or close this menu</td><td>Esc</td></tr>
@@ -167,7 +194,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       </section>
     </div>`;
   const $ = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel)!;
-  const speed = $('.speed'), speedVal = $('.speedVal'), bestVal = $('.bestVal'), overlay = $('.overlay'), status = $('.status'), bindBtn = $<HTMLButtonElement>('.bindBtn');
+  const speed = $('.speed'), speedVal = $('.speedVal'), bestVal = $('.bestVal'), overlay = $('.overlay'), status = $('.status'), bindBtn = $<HTMLButtonElement>('.bindBtn:not(.keyBind)');
   const time = $('.time'), best = $('.best'), flash = $('.flash');
   const form = $<HTMLFormElement>('.options');
   const el = form.elements as unknown as Record<string, HTMLInputElement & HTMLSelectElement & HTMLOutputElement>;
@@ -223,6 +250,10 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   el.showSpeed.checked = cur.showSpeed;
   el.showGhost.checked = cur.showGhost;
   el.showViewmodel.checked = cur.showViewmodel;
+  el.speedFx.checked = cur.speedFx;
+  el.hudScale.value = String(cur.hudScale);
+  el.hudScaleOut.value = `${Math.round(cur.hudScale * 100)}%`;
+  root.style.setProperty('--hud-scale', String(cur.hudScale));
   el.wear.value = String(cur.wear);
   el.seed.value = String(cur.seed);
   const wearLabel = (w: number) => `${w.toFixed(3)}, ${w < 0.07 ? 'Factory New' : w < 0.15 ? 'Minimal Wear' : w < 0.38 ? 'Field-Tested' : w < 0.45 ? 'Well-Worn' : 'Battle-Scarred'}`;
@@ -242,6 +273,8 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   form.addEventListener('input', (e) => {
     if (e.target === el.file) return;
     el.fovOut.value = el.fov.value;
+    el.hudScaleOut.value = `${Math.round(Number(el.hudScale.value) * 100)}%`;
+    root.style.setProperty('--hud-scale', el.hudScale.value);
     el.wearOut.value = wearLabel(Number(el.wear.value));
     const sens = parseFloat(el.sensitivity.value), seed = parseInt(el.seed.value, 10);
     change({
@@ -255,6 +288,8 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       showSpeed: el.showSpeed.checked,
       showGhost: el.showGhost.checked,
       showViewmodel: el.showViewmodel.checked,
+      speedFx: el.speedFx.checked,
+      hudScale: Number(el.hudScale.value),
       knife: el.knife.value || cur.knife,
       // An unchanged finish list keeps the saved finish even if this knife doesn't offer it.
       finish: e.target === el.finish ? el.finish.value : cur.finish,
@@ -288,6 +323,25 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     overlay.hidden = false;
   });
   const finishPanel = $('.finishPanel');
+  $('.shareCopy').addEventListener('click', opts.onShareCopy);
+  $('.replayBtn').addEventListener('click', opts.onReplay);
+  $('.shareLoad').addEventListener('click', () => opts.onShareLoad($<HTMLInputElement>('.shareInput').value.trim()));
+  const keyButtons = [...root.querySelectorAll<HTMLButtonElement>('.keyBind')];
+  const showKeys = () => keyButtons.forEach((b) => (b.textContent = bindLabel(cur.keys[b.dataset.key as keyof Settings['keys']])));
+  showKeys();
+  keyButtons.forEach((b) =>
+    b.addEventListener('click', () => {
+      b.textContent = 'Press a key… (Esc cancels)';
+      const onKey = (e: KeyboardEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        window.removeEventListener('keydown', onKey, true);
+        if (e.code !== 'Escape' && /^[A-Za-z0-9]{1,24}$/.test(e.code)) change({ keys: { ...cur.keys, [b.dataset.key!]: e.code } });
+        showKeys();
+      };
+      window.addEventListener('keydown', onKey, true);
+    }),
+  );
 
   // Rebind: the next key press or wheel notch becomes the jump bind; Esc cancels.
   bindBtn.addEventListener('click', () => {
@@ -462,11 +516,11 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       progressFill.style.width = `${pct}%`;
     },
     // Records for the current game; the current map's last finishes underneath.
-    setRecords(gameName: string, rows: { mapId: string; best: number; finishes: number; bestAt: number }[], currentId: string, recent: { time: number; at: number }[]) {
+    setRecords(gameName: string, rows: { mapId: string; best: number; finishes: number; bestAt: number; medal: string | null }[], currentId: string, recent: { time: number; at: number }[]) {
       $('.recordsTitle').textContent = `Your ${gameName} records`;
       for (const c of cards) {
         const row = rows.find((r) => r.mapId === c.dataset.map);
-        c.querySelector('.cardBest')!.textContent = row ? formatTime(row.best) : '';
+        c.querySelector('.cardBest')!.textContent = row ? `${row.medal ? row.medal + '  ' : ''}${formatTime(row.best)}` : '';
       }
       $('.noRecords').hidden = rows.length > 0;
       const table = $('.records');
@@ -489,7 +543,11 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
         }),
       );
     },
-    setSpeed: (u: number) => (speedVal.textContent = String(Math.round(u))),
+    setSpeed(u: number) {
+      speedVal.textContent = String(Math.round(u));
+      speedVal.dataset.tier = u >= 3000 ? '3' : u >= 2000 ? '2' : u >= 1000 ? '1' : '';
+    },
+    setShareNote: (msg: string) => ($('.shareNote').textContent = msg),
     showOverlay: (show: boolean) => (overlay.hidden = !show),
     startOpen: () => !start.hidden,
     showStart: (show: boolean) => (start.hidden = !show),

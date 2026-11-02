@@ -11,7 +11,7 @@ No game files are included. The game reads maps, knives and textures from your o
 
 ### Hosting it
 
-Every push to `master` tests, builds and deploys through `.github/workflows/deploy.yml`. Turn it on once in the repo: **Settings → Pages → Source → GitHub Actions**. The game is then at `https://<username>.github.io/<repo>/`.
+`.github/workflows/deploy.yml` tests, builds and deploys only when you run it from the Actions tab. Turn it on once in the repo: **Settings → Pages → Source → GitHub Actions**. The game is then at `https://<username>.github.io/<repo>/`.
 
 The build leaves out `public/`, where imported Steam files live, so `dist` is also safe to upload to any static host.
 
@@ -29,6 +29,14 @@ The build leaves out `public/`, where imported Steam files live, so `dist` is al
 - **Checkpoints and practice mode.** Teleporting to a checkpoint marks the run as practice, so it isn't saved as a record.
 - **Chat and console.** Chat (Y) takes `!` commands. The developer console (`` ` ``) has CS commands, `sv_` cvars, binds, autocorrect, and Tab completion.
 - **Two menu themes.** The menu and HUD use either the CS 1.6 VGUI look or a CS:GO theme, following the game setting.
+
+## In the hosted game
+
+- **Stages:** longer maps come in stages. A fall returns you to the stage you're on, and the chat compares each stage with your best run.
+- **Medals:** gold, silver and bronze per built-in map (estimated targets for now).
+- **Race a friend:** Records tab, copy a code for your best run. A friend pastes it to race your orange ghost.
+- **Replay:** watch your best run from behind, from the Records tab.
+- **Checkpoints:** 1 saves, 2 returns, 3 steps back through earlier ones (practice runs).
 
 ## Getting started
 
