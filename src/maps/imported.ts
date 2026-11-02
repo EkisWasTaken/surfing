@@ -24,9 +24,14 @@ export function saveGoal(mapId: string, p: Vec3) {
   } catch {}
 }
 
-export function bspToMap(bsp: BspMap, fileName: string): MapDef & { goalFromMap: boolean } {
+// Whether a map's finish is the same for every player, so its times can be compared on a leaderboard.
+export const sharedFinish = (m: { mesh?: unknown; goalFromMap?: boolean }) => !m.mesh || !!m.goalFromMap;
+
+// finish: the point licensed-maps/manifest.json gives for a map with no finish of its own, the same for everyone.
+export function bspToMap(bsp: BspMap, fileName: string, finish?: number[]): MapDef & { goalFromMap: boolean } {
   const id = `bsp:${fileName}`;
   const saved = loadGoal(id);
+  const given = finish && vec(finish[0], finish[1], finish[2]);
   return {
     id,
     name: `Imported: ${fileName.replace(/\.bsp$/i, '')}`,
@@ -36,8 +41,8 @@ export function bspToMap(bsp: BspMap, fileName: string): MapDef & { goalFromMap:
     killZ: bsp.killZ,
     // No start trigger: a box around spawn, so the timer starts when you leave it.
     startZone: bsp.startZone ?? [makeBox(add(bsp.spawn, vec(-96, -96, -16)), add(bsp.spawn, vec(96, 96, 128)))],
-    endZone: bsp.endZone ?? (saved ? [goalBox(saved)] : null),
-    goalFromMap: !!bsp.endZone,
+    endZone: bsp.endZone ?? (given ? [goalBox(given)] : saved ? [goalBox(saved)] : null),
+    goalFromMap: !!bsp.endZone || !!given,
     teleports: bsp.teleports,
     pushes: bsp.pushes,
     hurts: bsp.hurts,

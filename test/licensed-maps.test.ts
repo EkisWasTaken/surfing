@@ -20,6 +20,12 @@ describe('licensed-maps check', () => {
     expect(checkLicensedMaps('licensed-maps')).toEqual([]);
     expect(checkLicensedMaps(setup([good], ['a.bsp', 'proofs/a.png']))).toEqual([]);
   });
+  it('accepts a finish point and refuses a broken one', () => {
+    expect(checkLicensedMaps(setup([{ ...good, finish: [1, -2.5, 3] }], ['a.bsp', 'proofs/a.png']))).toEqual([]);
+    for (const finish of [[1, 2], 'here', [1, 2, '3'], [1, 2, null]]) {
+      expect(checkLicensedMaps(setup([{ ...good, finish }], ['a.bsp', 'proofs/a.png'])).join()).toContain('"finish"');
+    }
+  });
   it('refuses a map with no entry', () => {
     expect(checkLicensedMaps(setup([], ['b.bsp']))[0]).toContain('no entry');
   });

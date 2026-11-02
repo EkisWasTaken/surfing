@@ -21,6 +21,8 @@ export function checkLicensedMaps(dir: string): string[] {
     if (!/^[\w.-]+\.bsp$/i.test(m.file)) errors.push(`${label}: "file" must be a plain .bsp file name`);
     else if (!existsSync(join(dir, m.file))) errors.push(`${label}: the map file isn't in the folder`);
     if (typeof m.proof === 'string' && m.proof.trim() && !existsSync(join(dir, m.proof))) errors.push(`${label}: the proof file ${m.proof} isn't in the folder`);
+    const finish = m.finish;
+    if (finish !== undefined && !(Array.isArray(finish) && finish.length === 3 && finish.every((v) => typeof v === 'number' && Number.isFinite(v)))) errors.push(`${label}: "finish" must be three numbers: [x, y, z]`);
     listed.add(m.file);
   }
   for (const f of readdirSync(dir)) if (/\.bsp$/i.test(f) && !listed.has(f)) errors.push(`${f}: has no entry in manifest.json`);

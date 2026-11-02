@@ -9,7 +9,7 @@ import { vec, add, sub, scale, angleVectors, normalize } from './math';
 import { maps as builtins, findMap } from './maps';
 import { medalFor } from './maps/build';
 import type { MapDef } from './maps';
-import { bspToMap, goalBox, saveGoal } from './maps/imported';
+import { bspToMap, goalBox, loadGoal, saveGoal, sharedFinish } from './maps/imported';
 import { parseBsp } from './bsp';
 import { readZip } from './pak';
 import type { VtexJson } from './cs2model';
@@ -38,6 +38,7 @@ if (!document.createElement('canvas').getContext('webgl2')) {
 }
 const licensedFiles = import.meta.glob('/licensed-maps/*.bsp', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
 const licensedUrl = (file: string) => licensedFiles[`/licensed-maps/${file}`] as string | undefined;
+const licensed = licensedMaps as { file: string; name: string; author: string; permission: string; source?: string; difficulty?: string; finish?: number[] }[];
 const canvas = document.querySelector<HTMLCanvasElement>('#game')!;
 const input = createInput(canvas);
 const renderer = createRenderer(canvas);
@@ -288,7 +289,8 @@ async function showBoard(mapId = boardMap) {
   put([], 'Loading…');
   try {
     const rows = await board.top(settings.groupCode, me, track, shown);
-    if (asked === boardAsked) put(rows.map((r) => ({ ...r, medal: def ? medalFor(def, r.time) : null })), rows.length ? '' : 'No times on this map yet.');
+    const open = maps.find((m) => m.id === shown);
+    if (asked === boardAsked) put(rows.map((r) => ({ ...r, medal: def ? medalFor(def, r.time) : null })), rows.length ? '' : open && !sharedFinish(open) ? "This map has no finish everyone shares, so its times stay on each player's PC." : 'No times on this map yet.');
   } catch (e) {
     if (asked !== boardAsked) return;
     put([], e instanceof Error && e.message === WRONG_CODE ? "That group code doesn't work any more. Ask for the new one." : "The leaderboard can't be reached right now. Your times still save here.");
@@ -300,7 +302,7 @@ async function syncBoards() {
   try {
     for (const [key, r] of Object.entries(records)) {
       const at = key.indexOf(':'), track = key.slice(0, at) as Track, id = key.slice(at + 1);
-      if (onBoards(id)) await board.submit(settings.groupCode, me, player(), track, id, r.best);
+      if (onBoards(id) && !loadGoal(id)) await board.submit(settings.groupCode, me, player(), track, id, r.best); // a saved goal: these times may be to a personal finish
     }
   } catch {} // tried again next time the game opens
 }
@@ -321,10 +323,12 @@ async function joinGroup(typed: string) {
 }
 let finishNo = 0;
 // After a saved run: your best goes up (the database keeps the faster), and the finish screen shows where you stand.
-async function postBest(best: number) {
+async function postBest(best: number, time: number) {
   if (!board || !settings.groupCode || !onBoards(map.id)) return;
   const asked = ++finishNo, track = runTrack(), id = map.id;
   const say = (text: string) => void (asked === finishNo && finishShown && hud.setFinishBoard(text));
+  if (!sharedFinish(map)) return say('Saved on this PC only: this map has no finish everyone shares.');
+  if (loadGoal(id)) best = time; // older times here may be to a personal finish
   try {
     await board.submit(settings.groupCode, me, player(), track, id, best);
     const mine = (await board.top(settings.groupCode, me, track, id)).find((r) => r.mine);
@@ -504,6 +508,7 @@ function setGoal(print: Print) {
   saveGoal(map.id, cur.pos);
   hud.flash('Finish set here');
   print('Finish set here. Reach it to stop the timer.');
+  if (licensed.some((l) => `bsp:${l.file}` === map.id)) print(`To make this the finish for everyone, add this to the map's entry in licensed-maps/manifest.json: "finish": [${Math.round(cur.pos.x)}, ${Math.round(cur.pos.y)}, ${Math.round(cur.pos.z)}]`);
 }
 const surfLine: Print = (text, tone) => surf({ text, tone: tone === 'error' ? 'bad' : undefined });
 
@@ -553,7 +558,7 @@ async function loadBsp(read: () => Promise<ArrayBuffer>, name: string, stock?: M
     await nextFrame();
     const bsp = parseBsp(bytes, name);
     for (const [k, v] of stock ?? []) if (!bsp.pak.has(k)) bsp.pak.set(k, v);
-    const m = bspToMap(bsp, name);
+    const m = bspToMap(bsp, name, licensed.find((l) => l.file === name)?.finish);
     const i = maps.findIndex((x) => x.id === m.id);
     if (i >= 0) maps[i] = m;
     else maps.push(m);
@@ -682,7 +687,7 @@ function loadClassic() {
 }
 if (settings.game === 'cs16') loadClassic();
 // Maps used with permission (licensed-maps/), in every build.
-for (const m of licensedMaps as { file: string; name: string; author: string; permission: string; source?: string; difficulty?: string }[]) {
+for (const m of licensed) {
   hud.addLicensedMap({ id: `bsp:${m.file}`, name: m.name, difficulty: m.difficulty, source: m.source, credit: `by ${m.author}. ${m.permission}.` });
 }
 if (wantedMap.startsWith('bsp:') && licensedUrl(wantedMap.slice(4))) loadFolderMap(wantedMap.slice(4));
@@ -922,7 +927,7 @@ function tick(cmd: ReturnType<typeof input.cmd>, tickDt: number) {
       announceFinish(r);
       showFinish(r.kind === 'first' ? 'First record!' : r.kind === 'pb' ? 'New personal best!' : 'Finished', [r.kind === 'first' ? '' : `${signed(r.delta)} vs your best`, medalFor(map, run.time) ? `${medalFor(map, run.time)} medal` : '', rival ? `${signed(run.time - rival.time)} vs ${rival.name}` : ''].filter(Boolean).join('   '), r.kind === 'slower' ? 'bad' : 'good');
       refreshRecords();
-      postBest(r.record.best);
+      postBest(r.record.best, run.time);
       // A new best becomes the ghost you race next time.
       const g = r.kind !== 'slower' ? ghostFromTicks(recording, tickDt) : null;
       if (g) saveGhost(runTrack(), map.id, (ghost = g));

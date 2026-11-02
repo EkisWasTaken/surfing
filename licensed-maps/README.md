@@ -17,12 +17,21 @@ Maps in this folder ship in the hosted game, so only add a map if its author has
     "permission": "Author said yes on Discord, 2026-11-03",
     "proof": "proofs/surf_example.png",
     "source": "https://link-to-the-map",
-    "difficulty": "medium"
+    "difficulty": "medium",
+    "finish": [1024, -512, 64]
   }
 ]
 ```
 
-`file`, `name`, `author`, `permission` and `proof` are required. `source` and `difficulty` are optional.
+`file`, `name`, `author`, `permission` and `proof` are required. `source`, `difficulty` and `finish` are optional.
+
+## Leaderboards
+
+Every map here gets its own leaderboard, as long as its finish is the same for everyone. Most maps have a finish built in, and then there's nothing to do.
+
+If a map doesn't, the game tells you when you load it. Stand at the finish, open the console, type `setgoal`, and copy the `"finish"` line it prints into the map's entry. Until then, times on that map stay on each player's PC, because a personal `setgoal` could be placed anywhere.
+
+Replacing a map file keeps its old times, so a changed course can leave records nobody can beat. To reset a board, delete that map's rows in the database.
 
 The build stops with an error if a map here has no complete entry, or an entry has no map or proof, so nothing goes out uncredited. The author and permission text are shown in the game's credits.
 
