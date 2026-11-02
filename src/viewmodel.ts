@@ -208,6 +208,8 @@ export function createViewmodel(renderer: THREE.WebGLRenderer) {
     camera,
     empty: () => (game === 'cs16' ? !k16 && !ownRigs.cs16 : !knife && !arms && !ownRigs.csgo),
     setOwn(g: GameMode, root: THREE.Object3D, clips: THREE.AnimationClip[]) {
+      ownRigs[g]?.root.removeFromParent();
+      if (g === game) ownAction = null;
       root.traverse((o) => (o.frustumCulled = false)); // skinned: the bind-pose bounds say nothing about where the pose is
       root.visible = false;
       rig.add(root);

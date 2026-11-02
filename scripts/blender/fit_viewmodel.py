@@ -1,5 +1,6 @@
 # Fits the licensed arms and a knife together, animates them and exports a viewmodel for the game.
 #   MODELS=<folder with arms/ and knife/ unzipped> blender -b -P scripts/blender/fit_viewmodel.py
+#   VM_KNIFE=m9 uses the M9 Bayonet (MODELS/m9 unzipped) instead of the karambit.
 #   VM_SET=retro makes the Classic set instead: the same arms cut down to a low-poly, pixel-textured look, with a simple straight knife of ours.
 # Models (both CC BY, see the README's credits): "FREE [FPS Arms] GameReady - RIGGED" by bamenwo05, "Karambit Knife" by ediirawan.
 # Space: metres, camera at the origin looking along +Y, +X right, +Z up (glTF export makes that three's -Z forward).
@@ -13,7 +14,9 @@ from mathutils.bvhtree import BVHTree
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 MODELS = os.environ['MODELS']
 RETRO = os.environ.get('VM_SET') == 'retro'
-OUT = os.path.join(ROOT, 'src', 'assets', 'viewmodel', 'retro.glb' if RETRO else 'modern.glb')
+KNIFE = 'straight' if RETRO else os.environ.get('VM_KNIFE', 'karambit')
+UPRIGHT = KNIFE != 'karambit'  # held blade up, in a forward grip; the karambit hangs below the fist
+OUT = os.path.join(ROOT, 'src', 'assets', 'viewmodel', {'straight': 'retro.glb', 'karambit': 'karambit.glb', 'm9': 'm9.glb'}[KNIFE])
 FPS = 30
 TEX = 128 if RETRO else 1024
 
@@ -98,7 +101,7 @@ to_hand = HAND0.inverted()
 print('HANDFRAME', {n: [round(c, 3) for c in to_hand @ head(n)] for n in ('Finger_1_1.R', 'Finger_2_1.R', 'Finger_3_1.R', 'Finger_4_1.R', 'Finger_5_1.R')})
 
 # ---------- Knife: ring on the index finger, handle across the fist, grooves towards the fingers, tip curling forward ----------
-RING_HAND = Vector((-0.026, 0.080, -0.027)) if RETRO else Vector((-0.026, 0.086, -0.030))  # knife origin in hand space
+RING_HAND = Vector((-0.026, 0.080, -0.027)) if UPRIGHT else Vector((-0.026, 0.086, -0.030))  # knife origin in hand space
 
 
 def flat(name, color, rough, metal=0.0):
@@ -139,6 +142,17 @@ if RETRO:
     bpy.context.collection.objects.link(knife)
     for m in (flat('steel', (0.62, 0.64, 0.67), 0.38, 0.8), flat('grip', (0.05, 0.04, 0.03), 0.85), flat('guard', (0.26, 0.26, 0.27), 0.5, 0.6)):
         me.materials.append(m)
+elif KNIFE == 'm9':
+    # Licensed M9: the model already lies along the hand's axes (blade -X, edge +Y). Handle starts just past the index finger.
+    M9_SCALE = 0.0787  # 3.81 long -> 30 cm
+    M9_ORIGIN = Vector((0.353, 0.05, -0.007))
+    bpy.ops.import_scene.fbx(filepath=at('m9', 'source', 'KnifeM9.fbx'))
+    knife = next(o for o in bpy.data.objects if o.type == 'MESH' and o is not mesh)
+    M = lambda n, part: at('m9', 'textures', f'Ry41_(3)_Material.{n}_{part}.png')
+    for slot, n in enumerate(('010', '011', '012')):
+        knife.data.materials[slot] = pbr('m9-' + n, M(n, 'BaseColor'), M(n, 'Normal'), M(n, 'Roughness'), M(n, 'Metallic'))
+    knife.data.transform(HAND0 @ Matrix.Translation(RING_HAND) @ Matrix.Scale(M9_SCALE, 4) @ Matrix.Translation(-M9_ORIGIN) @ knife.matrix_world)
+    knife.matrix_world = Matrix.Identity(4)
 else:
     # Licensed karambit: ring on the index finger, handle across the fist, grooves towards the fingers, tip curling forward.
     RING_MODEL = Vector((1.84, 0, 0.79))  # ring centre in the model
@@ -167,11 +181,11 @@ bpy.ops.object.mode_set(mode='OBJECT')
 
 # ---------- Poses ----------
 # Where the right hand rests in view, and the forearm leading to it.
-WRIST = Vector((0.145, 0.300, -0.130)) if RETRO else Vector((0.168, 0.400, -0.112))
+WRIST = Vector((0.145, 0.300, -0.130)) if RETRO else Vector((0.172, 0.425, -0.128)) if UPRIGHT else Vector((0.168, 0.400, -0.112))
 # Little finger side. Modern: down, a hammer grip with the blade below the fist. Classic: down and back, so the straight blade points up and forward.
-HAND_X = Vector((0.16, -0.46, -0.87)) if RETRO else Vector((-0.24, 0.52, -0.82))
-HAND_Y = Vector((-0.66, 0.72, -0.08)) if RETRO else Vector((-0.62, 0.76, 0.18))  # knuckles close to in line with the forearm, turned to show the blade's flat
-FORE_DIR = Vector((-0.40, 0.84, 0.36)).normalized() if RETRO else Vector((-0.34, 0.88, 0.33)).normalized()
+HAND_X = Vector((0.16, -0.46, -0.87)) if UPRIGHT else Vector((-0.24, 0.52, -0.82))
+HAND_Y = Vector((-0.66, 0.72, -0.08)) if UPRIGHT else Vector((-0.62, 0.76, 0.18))  # knuckles close to in line with the forearm, turned to show the blade's flat
+FORE_DIR = Vector((-0.40, 0.84, 0.36)).normalized() if UPRIGHT else Vector((-0.34, 0.88, 0.33)).normalized()
 x, y = HAND_X.normalized(), HAND_Y.normalized()
 y = (y - x * y.dot(x)).normalized()
 HAND_T = Matrix((x, y, x.cross(y))).transposed().to_4x4()
@@ -243,7 +257,7 @@ def cost(f, joints):
             if i > 0 and p.z > -0.012 and p.y < 0.098:
                 c += 40 * (p.z + 0.012) ** 2  # nor through the palm
     c += 6 * (joints[3].x - GROOVE_X[f]) ** 2 + 6 * (joints[1].x - GROOVE_X[f]) ** 2  # stay in this finger's groove
-    if f == '2' and not RETRO:
+    if f == '2' and not UPRIGHT:
         c += 12 * ((joints[0].lerp(joints[1], 0.75) - RING_HAND).length) ** 2  # through the ring
     return c
 
@@ -394,7 +408,7 @@ def pose(p, k):
     for n, t in out.items():
         p[n].matrix = t @ bones[n].matrix_local
         bpy.context.view_layer.update()
-    p['knife'].rotation_quaternion = Quaternion(curl_axis_local('knife', Z, 'R'), math.radians(k.spin))
+    p['knife'].rotation_quaternion = Quaternion(curl_axis_local('knife', Z, 'R'), math.radians(k.spin if KNIFE == 'karambit' else 0))  # only the ring lets a knife spin round a finger
 
 
 MOVING = ['FPS Arms Root', 'Arm_1.R', 'Arm_2.R', 'Hand_1.R', 'Arm_1.L', 'Arm_2.L', 'Hand_1.L', 'knife']

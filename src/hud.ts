@@ -1,5 +1,5 @@
 import type { Settings } from './settings';
-import { HOSTED, gameLabel } from './hosted';
+import { gameLabel } from './hosted';
 import { formatTime } from './timer';
 import { bindLabel, wheelCode } from './input';
 
@@ -140,7 +140,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
                 <tr><td>Open or close this menu</td><td>Esc</td></tr>
               </tbody>
             </table>
-            <p class="note credits">Arms: <a href="https://sketchfab.com/3d-models/none-296d30fc705b4dff85c2c8a2d2724e7f" target="_blank" rel="noopener">FREE [FPS Arms] GameReady - RIGGED</a> by bamenwo05. Knife: <a href="https://sketchfab.com/3d-models/none-554aac0e619e45f0a95b7c15cac7219c" target="_blank" rel="noopener">Karambit Knife</a> by ediirawan. Both <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, posed and animated for this game (a simplified version of the arms in ${gameLabel('cs16')}).</p>
+            <p class="note credits">M9 Bayonet: <a href="https://sketchfab.com/3d-models/m9-bayonet-knife-6d6d3163afc8428b8a212d347ce01f39" target="_blank" rel="noopener">M9 Bayonet Knife</a> by ThomasEs. Arms: <a href="https://sketchfab.com/3d-models/none-296d30fc705b4dff85c2c8a2d2724e7f" target="_blank" rel="noopener">FREE [FPS Arms] GameReady - RIGGED</a> by bamenwo05. Karambit: <a href="https://sketchfab.com/3d-models/none-554aac0e619e45f0a95b7c15cac7219c" target="_blank" rel="noopener">Karambit Knife</a> by ediirawan. All <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, posed and animated for this game (a simplified version of the arms in ${gameLabel('cs16')}).</p>
           </div>
         </form>
         <footer class="buttons"><button class="play" type="button">Play</button></footer>
@@ -168,8 +168,8 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     $('.tickHint').hidden = cur.game !== 'cs16';
     // CS 1.6 has one knife and no skins, and no inspect.
     root.querySelectorAll<HTMLElement>('.cs2Only').forEach((e) => (e.hidden = cur.game === 'cs16'));
-    $('#tab-knife').hidden = HOSTED || cur.game === 'cs16';
-    if ((HOSTED || cur.game === 'cs16') && tab === 'knife') selectTab('map');
+    $('#tab-knife').hidden = cur.game === 'cs16';
+    if (cur.game === 'cs16' && tab === 'knife') selectTab('map');
   };
   // Tabs: click or arrow keys; the open tab is remembered on this device.
   const tabButtons = [...root.querySelectorAll<HTMLButtonElement>('[role=tab]')];
@@ -197,7 +197,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   try {
     saved = localStorage.getItem('surf-menu-tab');
   } catch {}
-  selectTab(TABS.some((t) => t.id === saved) && !(HOSTED && saved === 'knife') ? saved! : 'map');
+  selectTab(TABS.some((t) => t.id === saved) ? saved! : 'map');
   showGame();
   el.autobhop.checked = cur.autobhop;
   el.showSpeed.checked = cur.showSpeed;

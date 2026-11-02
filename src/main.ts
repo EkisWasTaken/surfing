@@ -1,6 +1,7 @@
 import './style.css';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import modernModel from './assets/viewmodel/modern.glb?url';
+import karambitModel from './assets/viewmodel/karambit.glb?url';
+import m9Model from './assets/viewmodel/m9.glb?url';
 import retroModel from './assets/viewmodel/retro.glb?url';
 import { HOSTED, OWN_MODELS, gameLabel, gameTitle, parseGame } from './hosted';
 import { config } from './config';
@@ -97,7 +98,7 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
     if (gameChanged) (renderer.setGame(next.game), (ghost = loadGhost(next.game, map.id)));
     if (gameChanged && !mapChanged) respawn(); // hulls and rules differ: start the run over under the new ones
     if (gameChanged && !mapChanged) (announceMap(), refreshRecords());
-    if (knifeChanged) loadKnife(next.knife);
+    if (knifeChanged) (OWN_MODELS ? loadOwnKnife : loadKnife)(next.knife);
     else if (finishChanged) applyFinish();
     if (!mapChanged) return;
     const known = maps.find((m) => m.id === next.map);
@@ -504,7 +505,18 @@ function applyFinish() {
 // CS 1.6's knife and hands (v_knife.mdl from your Counter-Strike install, copied by the import).
 renderer.setGame(settings.game);
 const gltf = new GLTFLoader();
-gltf.load(modernModel, (g) => renderer.setOwn('csgo', g.scene, g.animations), undefined, (e) => console.warn('viewmodel:', e));
+// The game's own knives, each loaded when picked (its file carries the arms too).
+const OWN_KNIVES = [{ id: 'knife_karambit', name: 'Karambit', url: karambitModel }, { id: 'knife_m9', name: 'M9 Bayonet', url: m9Model }];
+function loadOwnKnife(id: string) {
+  const k = OWN_KNIVES.find((x) => x.id === id) ?? OWN_KNIVES[0];
+  gltf.load(k.url, (g) => {
+    if ((OWN_KNIVES.find((x) => x.id === settings.knife) ?? OWN_KNIVES[0]) === k) renderer.setOwn('csgo', g.scene, g.animations); // a newer pick wins the race
+  }, undefined, (e) => console.warn('viewmodel:', e));
+}
+if (OWN_MODELS) {
+  hud.setKnives(OWN_KNIVES);
+  loadOwnKnife(settings.knife);
+} else loadOwnKnife(OWN_KNIVES[0].id); // shown until the imported CS2 knife arrives
 gltf.load(retroModel, (g) => renderer.setOwn('cs16', g.scene, g.animations), undefined, (e) => console.warn('viewmodel:', e));
 // The public build has none of these files, so it doesn't ask for them.
 if (!OWN_MODELS) {
