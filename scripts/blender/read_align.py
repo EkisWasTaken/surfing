@@ -27,6 +27,12 @@ hold = {
     'fore': flat(rigid(bpy.data.objects['Forearm'].evaluated_get(dg).matrix_world)),
     'knife': flat(adj),
 }
+if 'Left Hand' in bpy.data.objects:
+    hold['left_hand'] = flat(rigid(bpy.data.objects['Left Hand'].evaluated_get(dg).matrix_world))
+    hold['left_fore'] = flat(rigid(bpy.data.objects['Left Forearm'].evaluated_get(dg).matrix_world))
+if 'fingers_editable' in kn:
+    arm = next(o for o in bpy.data.objects if o.type == 'ARMATURE')
+    hold['fingers'] = {b.name: list(b.rotation_quaternion) for b in arm.pose.bones if b.name.startswith('Finger_') and not b.name.endswith('_end')}
 os.makedirs(os.path.join(ROOT, 'scripts', 'blender', 'holds'), exist_ok=True)
 path = os.path.join(ROOT, 'scripts', 'blender', 'holds', name + '.json')
 with open(path, 'w') as f:

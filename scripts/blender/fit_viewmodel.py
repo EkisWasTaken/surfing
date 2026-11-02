@@ -207,13 +207,19 @@ ELBOW = WRIST - FORE_DIR * L_FORE
 FORE_T = hold_matrix(HOLD['fore']) if HOLD else frame(WRIST, FORE_DIR, HAND_T.col[2].to_3d())  # turned with the hand, so the wrist does not twist
 UPPER_T = frame(ELBOW, (-0.25, 0.75, 0.55), (0, 0, 1))
 # Left arm: mirrored into the lower left, fingers relaxed.
-L_WRIST = Vector((0.33, 0.22, -0.36))  # out of view until something brings it up
+L_WRIST = Vector((0.235, 0.33, -0.165))  # low on the other side of the screen
 L_FORE_DIR = Vector((-0.34, 0.86, 0.38)).normalized()
 L_HAND_T = frame(L_WRIST, (-0.55, 0.82, 0.12), (0.30, 0.20, 0.93))
 L_FORE_T = frame(L_WRIST, L_FORE_DIR, (0.2, 0.1, 0.97))
 L_ELBOW = L_WRIST - L_FORE_DIR * L_FORE
 L_UPPER_T = frame(L_ELBOW, (-0.2, 0.8, 0.5), (0, 0, 1))
 MIRROR = Matrix.Scale(-1, 4, (1, 0, 0))
+# The left arm's frames, mirrored across into place. The upper arm keeps its angle to the forearm.
+L_HAND_W, L_FORE_W = MIRROR @ L_HAND_T @ MIRROR, MIRROR @ L_FORE_T @ MIRROR
+L_UPPER_REL = L_FORE_W.inverted() @ MIRROR @ L_UPPER_T @ MIRROR
+if HOLD and 'left_hand' in HOLD:
+    L_HAND_W, L_FORE_W = hold_matrix(HOLD['left_hand']), hold_matrix(HOLD['left_fore'])
+L_REST = lambda m: MIRROR @ m.inverted() @ MIRROR  # a right-arm rest frame, as seen by the left arm
 
 
 def curl_axis_local(name, axis_hand, side):
@@ -375,6 +381,8 @@ def set_fingers(p):
     for seg, (axis, a) in enumerate(THUMB_RELAX):
         n = f'Finger_1_{seg + 1}.L'
         p[n].rotation_quaternion = Quaternion(curl_axis_local(n, axis, 'L'), math.radians(a))
+    for n, q in (HOLD or {}).get('fingers', {}).items():  # posed by hand: these win over the solver
+        p[n].rotation_quaternion = q
 
 
 class Key:
@@ -414,9 +422,9 @@ def pose(p, k):
         'Arm_1.R': upper,
         'Arm_2.R': fore,
         'Hand_1.R': hand,
-        'Arm_1.L': left @ MIRROR @ L_UPPER_T @ UPPER0.inverted() @ MIRROR,
-        'Arm_2.L': left @ MIRROR @ L_FORE_T @ FORE0.inverted() @ MIRROR,
-        'Hand_1.L': left @ MIRROR @ L_HAND_T @ HAND0.inverted() @ MIRROR,
+        'Arm_1.L': left @ L_FORE_W @ L_UPPER_REL @ L_REST(UPPER0),
+        'Arm_2.L': left @ L_FORE_W @ L_REST(FORE0),
+        'Hand_1.L': left @ L_HAND_W @ L_REST(HAND0),
     }
     for n, t in out.items():
         p[n].matrix = t @ bones[n].matrix_local
@@ -533,8 +541,26 @@ if os.environ.get('VM_ALIGN'):
     follow('Arm_2.R', fore_h, FORE0.inverted() @ rest('Arm_2.R'))
     follow('Arm_1.R', fore_h, FORE_T.inverted() @ UPPER_T @ UPPER0.inverted() @ rest('Arm_1.R'))
     follow('knife', knife_h, Matrix.Translation(-RING_HAND) @ HAND0.inverted() @ rest('knife'))
-    for o in (arm, mesh, knife):
-        o.hide_select = True  # only the handles can be clicked
+    left_hand_h = empty('Left Hand', L_HAND_W, size=0.05)
+    left_fore_h = empty('Left Forearm', L_FORE_W, size=0.09, kind='SINGLE_ARROW')
+    for h in (left_hand_h, left_fore_h):
+        h.show_name = h.show_in_front = True
+    left_fore_h.constraints.new('COPY_LOCATION').target = left_hand_h
+    follow('Hand_1.L', left_hand_h, L_REST(HAND0) @ rest('Hand_1.L'))
+    follow('Arm_2.L', left_fore_h, L_REST(FORE0) @ rest('Arm_2.L'))
+    follow('Arm_1.L', left_fore_h, L_UPPER_REL @ L_REST(UPPER0) @ rest('Arm_1.L'))
+    knife_h['fingers_editable'] = True
+    for o in (mesh, knife):
+        o.hide_select = True  # only the handles and finger joints can be clicked
+    # Finger joints stay clickable alongside the handles: pose mode, with every other bone hidden.
+    for b in bones:
+        b.hide = not (b.name.startswith('Finger_') and not b.name.endswith('_end'))
+    arm.show_in_front = True
+    arm.data.display_type = 'STICK'
+    bpy.context.scene.tool_settings.lock_object_mode = False
+    bpy.context.view_layer.objects.active = arm
+    arm.select_set(True)
+    bpy.ops.object.mode_set(mode='POSE')
 
     # The game's view: viewmodel FOV is horizontal at 4:3.
     fov = math.radians(90 if RETRO else 68)
