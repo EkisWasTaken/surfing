@@ -102,11 +102,13 @@ function useMap(m: MapDef) {
 }
 useMap(map);
 
+const tauri = (window as unknown as { __TAURI__?: { core: { invoke(cmd: string): Promise<unknown> } } }).__TAURI__; // set only inside the desktop app
 const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
   maps,
   settings,
   onPlay: input.requestLock,
   onCloseMenu: () => closeMenu(),
+  onQuit: tauri ? () => void tauri.core.invoke('quit') : null,
   onBoardOpen: (mapId) => void showBoard(mapId),
   onGroupJoin: (code) => void joinGroup(code),
   onChange(next: Settings) {

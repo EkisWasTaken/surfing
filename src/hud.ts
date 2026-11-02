@@ -9,6 +9,7 @@ type HudOptions = {
   onChange: (s: Settings) => void;
   onPlay: () => void;
   onCloseMenu: () => void;
+  onQuit: (() => void) | null; // only the desktop app can close itself
   onBoardOpen: (mapId?: string) => void;
   onGroupJoin: (code: string) => void;
   onLoadFile: (file: File) => void;
@@ -221,7 +222,11 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
             <p class="note credits">M9 Bayonet: <a href="https://sketchfab.com/3d-models/m9-bayonet-knife-6d6d3163afc8428b8a212d347ce01f39" target="_blank" rel="noopener">M9 Bayonet Knife</a> by ThomasEs. Arms: <a href="https://sketchfab.com/3d-models/none-296d30fc705b4dff85c2c8a2d2724e7f" target="_blank" rel="noopener">FREE [FPS Arms] GameReady - RIGGED</a> by bamenwo05. Karambit: <a href="https://sketchfab.com/3d-models/none-554aac0e619e45f0a95b7c15cac7219c" target="_blank" rel="noopener">Karambit Knife</a> by ediirawan. All <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, posed and animated for this game (a simplified version of the arms in ${gameLabel('cs16')}).</p>
           </div>
         </form>
-        <footer class="buttons"><button class="play" type="button">Play</button></footer>
+        <footer class="buttons">
+          <button type="button" class="button quitGame" hidden>Quit game</button>
+          <button type="button" class="button exitFullscreen" hidden>Exit fullscreen</button>
+          <button class="play" type="button">Play</button>
+        </footer>
       </section>
     </div>`;
   const $ = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel)!;
@@ -340,6 +345,19 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     el.file.value = '';
   });
   $('.play').addEventListener('click', opts.onPlay);
+  // Also turns the setting off, or the next Play would go straight back to fullscreen.
+  const exitFullscreen = $('.exitFullscreen');
+  const showExit = () => (exitFullscreen.hidden = !document.fullscreenElement);
+  document.addEventListener('fullscreenchange', showExit);
+  exitFullscreen.addEventListener('click', () => {
+    el.fullscreen.checked = false;
+    change({ fullscreen: false });
+  });
+  if (opts.onQuit) {
+    const quit = $('.quitGame');
+    quit.hidden = false;
+    quit.addEventListener('click', opts.onQuit);
+  }
   // Start screen: the map list drives the same setting as the menu's map picker.
   const start = $('.start'), cards = [...root.querySelectorAll<HTMLButtonElement>('.mapCard')];
   const markCard = () => cards.forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.map === el.map.value)));
