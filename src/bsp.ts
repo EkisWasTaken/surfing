@@ -299,6 +299,9 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
       const hdrFaces = records(L.FACES_HDR, 56, faceRec);
       lightFaces = hdrFaces.length === faces.length ? hdrFaces : [];
     }
+    // A map compiled without working lights has a lightmap of pure black: draw it unlit, not invisible.
+    let anyLight = false;
+    for (let o = light.ofs; o + 3 < light.ofs + light.len && !anyLight; o += 4) anyLight = dv.getUint8(o) + dv.getUint8(o + 1) + dv.getUint8(o + 2) > 0;
     const lmS = (o: number) => [f32(o + 32), f32(o + 36), f32(o + 40), f32(o + 44)];
     const lmT = (o: number) => [f32(o + 48), f32(o + 52), f32(o + 56), f32(o + 60)];
     const lmAxes = records(L.TEXINFO, 72, (o) => ({ s: lmS(o), t: lmT(o) }));
@@ -330,7 +333,7 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
       }
       const lf = lightFaces[fi];
       const w = lf ? lf.lmSize[0] + 1 : 0, h = lf ? lf.lmSize[1] + 1 : 0;
-      const hasLight = lf && !(ti.flags & SURF_NOLIGHT) && lf.style0 !== 255 && lf.lightofs >= 0 && w > 0 && h > 0 && w <= 512 && h <= 512 && lf.lightofs + w * h * 4 <= light.len;
+      const hasLight = anyLight && lf && !(ti.flags & SURF_NOLIGHT) && lf.style0 !== 255 && lf.lightofs >= 0 && w > 0 && h > 0 && w <= 512 && h <= 512 && lf.lightofs + w * h * 4 <= light.len;
       items.push({ tex, poly, offset, color: td?.color ?? [0.6, 0.6, 0.6], ti: f.texinfo, face: fi, rect: hasLight ? { x: 0, y: 0, w, h } : null });
     }
 

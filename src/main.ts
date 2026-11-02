@@ -569,7 +569,7 @@ async function loadBsp(read: () => Promise<ArrayBuffer>, name: string, stock?: M
     refreshRecords();
     const goal = m.goalFromMap ? 'goal found in map' : m.endZone ? 'using your saved goal' : 'no finish in map: type setgoal in the console (or !setgoal in chat) at the finish';
     // Texture report so a missing-texture problem shows what happened (decode path, GPU support).
-    const texNote = tex ? ` Textures: ${tex.gpu + tex.cpu} loaded${tex.cpu ? ` (${tex.cpu} decoded on CPU: no GPU texture compression)` : ''}, ${tex.missing} missing${tex.missing && !stock && !HOSTED ? ' (stock CS:GO: run npm run import-maps with CS:GO legacy installed)' : ''}.` : '';
+    const texNote = tex ? ` Textures: ${tex.gpu + tex.cpu} loaded${tex.cpu ? ` (${tex.cpu} decoded on CPU: no GPU texture compression)` : ''}, ${tex.missing} missing${tex.missing && !stock && !HOSTED ? (USING_REAL ? ' (install the csgo_legacy beta of CS2 in Steam, then Import again, for the exact textures)' : ' (stock CS:GO: run npm run import-maps with CS:GO legacy installed)') : ''}.` : '';
     hud.setStatus(`Loaded ${m.brushes.length} brushes, ${m.teleports.length} teleports, ${m.pushes.length} boosters; ${goal}.${texNote}`);
   } catch (e) {
     hud.setStatus(e instanceof Error ? e.message : String(e), true);

@@ -157,6 +157,25 @@ describe('lightmaps', () => {
   });
 });
 
+describe('a lightmap of pure black', () => {
+  it('draws the map unlit rather than invisible, like a map with no lighting', () => {
+    const m = parseBsp(
+      buildBsp({
+        entities,
+        world: [floor],
+        submodels: [],
+        face: [{ verts: [[-512, -512, 0], [512, -512, 0], [512, 512, 0], [-512, 512, 0]], reflectivity: [1, 1, 1], name: 'DARK', flags: 0, light: { size: [4, 4], samples: Array.from({ length: 25 }, () => [0, 0, 0, 0]) } }],
+      }),
+      'dark',
+    );
+    const { width, height, data } = m.lightmap;
+    for (let v = 0; v < m.mesh.lmUvs.length / 2; v++) {
+      const x = Math.floor(m.mesh.lmUvs[v * 2] * width), y = Math.floor(m.mesh.lmUvs[v * 2 + 1] * height);
+      expect(decodeLight(data[(y * width + x) * 4])).toBeCloseTo(1, 1);
+    }
+  });
+});
+
 describe('lightmap exposure', () => {
   const withLight = (value: number) =>
     parseBsp(
