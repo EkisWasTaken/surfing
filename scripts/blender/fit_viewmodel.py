@@ -552,15 +552,22 @@ if os.environ.get('VM_ALIGN'):
     knife_h['fingers_editable'] = True
     for o in (mesh, knife):
         o.hide_select = True  # only the handles and finger joints can be clicked
-    # Finger joints stay clickable alongside the handles: pose mode, with every other bone hidden.
-    for b in bones:
-        b.hide = not (b.name.startswith('Finger_') and not b.name.endswith('_end'))
-    arm.show_in_front = True
-    arm.data.display_type = 'STICK'
-    bpy.context.scene.tool_settings.lock_object_mode = False
-    bpy.context.view_layer.objects.active = arm
-    arm.select_set(True)
-    bpy.ops.object.mode_set(mode='POSE')
+    # One ball on each fingertip: drag it and IK bends the whole finger, without touching any joints.
+    bpy.context.view_layer.update()
+    arm.hide_select = True
+    for bone in bones:
+        bone.hide = True
+    TIPS = [('Thumb', '1', 4), ('Index', '2', 3), ('Middle', '3', 3), ('Ring', '4', 3), ('Pinky', '5', 3)]
+    for side, label, hand in (('R', '', hand_h), ('L', 'Left ', left_hand_h)):
+        hand_m = hand.matrix_basis
+        for title, f, joints in TIPS:
+            last = p[f'Finger_{f}_{joints}.{side}']
+            ball = empty(label + title, hand_m.inverted() @ Matrix.Translation(last.tail), hand, size=0.009, kind='SPHERE')
+            ball.show_name = ball.show_in_front = True
+            ik = last.constraints.new('IK')
+            ik.target, ik.chain_count = ball, joints
+            for i in range(1, joints + 1):
+                p[f'Finger_{f}_{i}.{side}'].lock_ik_y = True  # no twisting along the finger
 
     # The game's view: viewmodel FOV is horizontal at 4:3.
     fov = math.radians(90 if RETRO else 68)
