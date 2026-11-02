@@ -8,11 +8,22 @@ type HudOptions = {
   settings: Settings;
   onChange: (s: Settings) => void;
   onPlay: () => void;
+  onCloseMenu: () => void;
   onLoadFile: (file: File) => void;
   onShareCopy: () => void;
   onShareLoad: (code: string) => void;
   onReplay: () => void;
 };
+
+// How far a dragged window may sit from its place in the layout: on screen, so it can't get lost.
+// A window taller than the screen scrolls instead, so it goes back to its own height.
+export function fitOffset(x: number, y: number, want: { x: number; y: number }, r: { left: number; top: number; width: number; height: number }, vw: number, vh: number) {
+  const homeX = r.left - x, homeY = r.top - y;
+  return {
+    x: Math.max(-homeX, Math.min(vw - r.width - homeX, want.x)),
+    y: r.height > vh ? 0 : Math.max(-homeY, Math.min(vh - r.height - homeY, want.y)),
+  };
+}
 
 // Small HUD glyphs, drawn in the HUD colour (currentColor).
 const ICON = {
@@ -41,7 +52,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     <p class="resumeHint" hidden>Click to play. Esc opens the menu.</p>
     <div class="consoleWrap" hidden>
       <section class="window console" role="dialog" aria-labelledby="consoleTitle">
-        <header class="titlebar"><h2 id="consoleTitle">Console</h2><span class="gameName">help lists every command</span></header>
+        <header class="titlebar"><h2 id="consoleTitle">Console</h2><span class="gameName">help lists every command</span><button type="button" class="button closeBtn consoleClose" aria-label="Close console">×</button></header>
         <div class="consoleLog" role="log" tabindex="0"></div>
         <form class="consoleForm">
           <input class="consoleInput" autocomplete="off" spellcheck="false" aria-label="Console command" />
@@ -88,7 +99,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     </div>
     <div class="overlay" hidden>
       <section class="window" role="dialog" aria-labelledby="windowTitle">
-        <header class="titlebar"><h1 id="windowTitle">Surf Sandbox</h1><span class="gameName"></span></header>
+        <header class="titlebar"><h1 id="windowTitle">Surf Sandbox</h1><span class="gameName"></span><button type="button" class="button closeBtn menuClose" aria-label="Close menu">×</button></header>
         <div class="tabs" role="tablist" aria-label="Menu sections">
           ${TABS.map((t) => `<button type="button" role="tab" id="tab-${t.id}" aria-controls="sheet-${t.id}" data-tab="${t.id}">${t.name}</button>`).join('')}
         </div>
@@ -413,6 +424,32 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     conInput.blur();
     onConsoleClose?.();
   };
+  $('.consoleClose').addEventListener('click', closeConsole);
+  $('.menuClose').addEventListener('click', opts.onCloseMenu);
+  // Drag a window by its title bar.
+  const draggable = (win: HTMLElement) => {
+    const bar = win.querySelector<HTMLElement>('.titlebar')!;
+    let at = { x: 0, y: 0 }, grab: { x: number; y: number } | null = null;
+    const place = (want: { x: number; y: number }) => {
+      at = fitOffset(at.x, at.y, want, win.getBoundingClientRect(), innerWidth, innerHeight);
+      win.style.transform = at.x || at.y ? `translate(${at.x}px, ${at.y}px)` : '';
+    };
+    bar.addEventListener('mousedown', (e) => e.preventDefault()); // the console keeps its typing focus, and no text gets selected
+    bar.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || (e.target as Element).closest('button')) return;
+      grab = { x: e.clientX - at.x, y: e.clientY - at.y };
+      bar.setPointerCapture(e.pointerId);
+    });
+    bar.addEventListener('pointermove', (e) => grab && place({ x: e.clientX - grab.x, y: e.clientY - grab.y }));
+    const drop = () => (grab = null);
+    bar.addEventListener('pointerup', drop);
+    bar.addEventListener('pointercancel', drop);
+    // Opening, a taller tab or a smaller browser could leave it off screen.
+    new ResizeObserver(() => place(at)).observe(win);
+    window.addEventListener('resize', () => place(at));
+  };
+  draggable(overlay.querySelector<HTMLElement>('.window')!);
+  draggable(conWrap.querySelector<HTMLElement>('.window')!);
   const showHint = () => {
     const word = conInput.value.trimStart().split(/\s+/)[0] ?? '', hits = word && !conInput.value.includes(' ') ? completer(word) : [];
     conHint.textContent = hits.length ? hits.slice(0, 8).join('   ') + (hits.length > 8 ? `   (+${hits.length - 8} more)` : '') : '';

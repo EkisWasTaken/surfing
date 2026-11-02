@@ -102,6 +102,7 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
   maps,
   settings,
   onPlay: input.requestLock,
+  onCloseMenu: () => closeMenu(),
   onChange(next: Settings) {
     const mapChanged = next.map !== settings.map, tickChanged = next.tickrate !== settings.tickrate || next.game !== settings.game;
     const gameChanged = next.game !== settings.game;
@@ -676,6 +677,11 @@ const showMenu = (open: boolean) => {
   hud.showOverlay(open);
   hud.showResume(!open);
 };
+const closeMenu = () => {
+  if (hud.backToStart()) return;
+  showMenu(false);
+  input.requestLock(); // after Esc usually refused; then the hint asks for a click
+};
 input.onLockChange((locked) => {
   if (locked) (menuClosed = false), hud.showStart(false);
   if (!locked) lockLostAt = performance.now();
@@ -695,9 +701,8 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !typing && !e.repeat && !hud.startOpen()) {
     if (input.locked()) return document.exitPointerLock(); // fullscreen holds Esc for us, so this one is the game's
     if (performance.now() - lockLostAt < 300) return; // the same press that just freed the mouse: the menu stays open
-    if (hud.backToStart()) return;
-    showMenu(menuClosed);
-    if (menuClosed) input.requestLock(); // usually refused right after Esc; then the hint asks for a click
+    if (menuClosed) showMenu(true);
+    else closeMenu();
     return;
   }
   if ((e.code === 'Backquote' || e.key === '`') && !typing && !e.repeat) { // the key under Esc, whatever the layout prints on it
