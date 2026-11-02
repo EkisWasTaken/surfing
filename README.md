@@ -6,7 +6,7 @@ No game files are included. The game reads maps, knives and textures from your o
 
 ## Two versions
 
-- **The hosted game** is what `npm run build` produces and what GitHub Pages serves. It's instantly playable from a link, with 6 original maps and nothing from Steam: no knives, skins or Valve textures. The two movement modes are called Modern and Classic. Anyone can still open a `.bsp` they already have with "Load .bsp file"; it stays in their own browser.
+- **The hosted game** is what `npm run build` produces and what GitHub Pages serves. It's instantly playable from a link, with 6 original maps and nothing from Steam: no Valve models, skins or textures. Its arms and knife are licensed models (see Credits). The two movement modes are called Modern and Classic. Anyone can still open a `.bsp` they already have with "Load .bsp file"; it stays in their own browser.
 - **The local version** (`npm run dev` after `npm run import-maps`) has everything below, read from your own Steam installs.
 
 ### Hosting it
@@ -127,6 +127,13 @@ npm run build     # type-check and production build
 | Viewmodel | `src/viewmodel.ts`, `src/viewmodelPose.ts` |
 | UI | `src/hud.ts`, `src/style.css`, `src/console.ts` |
 | Import | `scripts/import-maps.ts` |
+
+## Credits
+
+- Arms: [FREE [FPS Arms] GameReady - RIGGED](https://sketchfab.com/3d-models/none-296d30fc705b4dff85c2c8a2d2724e7f) by bamenwo05, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Posed and animated for this game.
+- Knife: [Karambit Knife](https://sketchfab.com/3d-models/none-554aac0e619e45f0a95b7c15cac7219c) by ediirawan, [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Rigged into the hand, textures resized.
+
+To rebuild them, unzip the two downloads into `arms/` and `knife/` in one folder (and the knife's inner `.rar` in place), then run `scripts/blender/fit_modern.py` in Blender with `MODELS` set to that folder.
 
 ## Disclaimer
 

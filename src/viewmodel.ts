@@ -150,6 +150,9 @@ function goldsrcRig(mdl: Mdl) {
   return { root, sequences: new Map(mdl.sequences.map((q) => [q.label.toLowerCase(), q])), sample };
 }
 
+// The game's own arms and knife (scripts/blender/viewmodels.py), used when nothing was imported for this game.
+type OwnRig = { root: THREE.Object3D; mixer: THREE.AnimationMixer; actions: Map<string, THREE.AnimationAction> };
+
 // CS 1.6 v_knife sequences for our clip names (it has no inspect), and each game's miss timing.
 const CS16_CLIPS: Partial<Record<keyof KnifeBundle['clips'], string>> = { draw: 'draw', idle: 'idle', light1: 'midslash1', light2: 'midslash2', heavy: 'stab_miss' };
 const COOLDOWN: Record<GameMode, { light: number; heavy: number }> = { csgo: { light: 500, heavy: 1000 }, cs16: { light: 350, heavy: 1000 } };
@@ -177,13 +180,18 @@ export function createViewmodel(renderer: THREE.WebGLRenderer) {
   let game: GameMode = 'csgo';
   cs16.visible = false;
   let k16: ReturnType<typeof goldsrcRig> | null = null;
+  const ownRigs: Partial<Record<GameMode, OwnRig>> = {};
+  let ownAction: THREE.AnimationAction | null = null, lastApply = 0;
 
   let arms: ReturnType<typeof skinnedRig> | null = null;
   let knife: { root: THREE.Object3D; mesh: THREE.Mesh; base: THREE.MeshStandardMaterial[]; rig: ReturnType<typeof skinnedRig> | null; clips: KnifeBundle['clips']; paint: PaintInputs | null } | null = null;
   let anim = { clip: 'draw' as keyof KnifeBundle['clips'], start: -1 }; // start < 0: begins on the first drawn frame (after upload/compile stalls)
   let nextAttack = 0, slashLeft = false;
+  const own = () => (game === 'cs16' ? (k16 ? undefined : ownRigs.cs16) : knife ? undefined : ownRigs.csgo);
   const seq16 = (clip: keyof KnifeBundle['clips']) => (CS16_CLIPS[clip] ? k16?.sequences.get(CS16_CLIPS[clip]!) : undefined);
   const duration = (clip: keyof KnifeBundle['clips']) => {
+    const o = own();
+    if (o) return o.actions.get(clip)?.getClip().duration ?? 0;
     if (game !== 'cs16') return knife?.clips[clip].duration ?? 0;
     const q = seq16(clip);
     return q ? q.frames / q.fps : 0;
@@ -198,13 +206,22 @@ export function createViewmodel(renderer: THREE.WebGLRenderer) {
   return {
     scene,
     camera,
-    empty: () => (game === 'cs16' ? !k16 : !knife && !arms),
+    empty: () => (game === 'cs16' ? !k16 && !ownRigs.cs16 : !knife && !arms && !ownRigs.csgo),
+    setOwn(g: GameMode, root: THREE.Object3D, clips: THREE.AnimationClip[]) {
+      root.traverse((o) => (o.frustumCulled = false)); // skinned: the bind-pose bounds say nothing about where the pose is
+      root.visible = false;
+      rig.add(root);
+      const mixer = new THREE.AnimationMixer(root);
+      ownRigs[g] = { root, mixer, actions: new Map(clips.map((c) => [c.name, mixer.clipAction(c)])) };
+      if (g === game) anim = { clip: 'draw', start: -1 };
+    },
     setGame(g: GameMode) {
       game = g;
       cs2.visible = g === 'csgo';
       cs16.visible = g === 'cs16';
       anim = { clip: 'draw', start: -1 };
       nextAttack = 0;
+      ownAction = null;
       resize(camera.aspect);
     },
     setKnife16(mdl: Mdl) {
@@ -248,7 +265,8 @@ export function createViewmodel(renderer: THREE.WebGLRenderer) {
     // Knife timing on a miss (slash: CS:GO 0.5 s, 1.6 0.35 s; stab 1 s), slashes alternating sides; interrupts draw/inspect.
     attack(kind: 'light' | 'heavy') {
       const now = performance.now();
-      if ((game === 'cs16' ? !k16 : !knife) || now < nextAttack) return;
+      if ((game === 'cs16' ? !k16 : !knife) && !own()) return;
+      if (now < nextAttack) return;
       const clip = kind === 'heavy' ? 'heavy' : slashLeft ? 'light2' : 'light1';
       if (kind === 'light') slashLeft = !slashLeft;
       nextAttack = now + COOLDOWN[game][kind];
@@ -258,11 +276,32 @@ export function createViewmodel(renderer: THREE.WebGLRenderer) {
     apply(p: Pose) {
       rig.position.set(p.x - p.swayX, p.y - p.swayY, 0);
       rig.rotation.set(p.swayY * 2, p.swayX * 2, 0);
-      if (game === 'cs16' ? !k16 : !arms || !knife) return;
+      const o = own();
+      for (const r of Object.values(ownRigs)) r.root.visible = r === o;
+      if (!o && (game === 'cs16' ? !k16 : !arms || !knife)) return;
       if (anim.start < 0) anim.start = performance.now();
       const t = (performance.now() - anim.start) / 1000, d = duration(anim.clip);
       if (anim.clip !== 'idle' && t >= d) anim = { clip: 'idle', start: anim.start + d * 1000 }; // one-shots fall back to idle
       const at = (performance.now() - anim.start) / 1000, idle = anim.clip === 'idle';
+      if (o) {
+        const a = o.actions.get(anim.clip);
+        const dt = Math.min(0.1, (performance.now() - lastApply) / 1000);
+        lastApply = performance.now();
+        if (!a) return;
+        if (a !== ownAction) {
+          a.reset();
+          a.setLoop(idle ? THREE.LoopRepeat : THREE.LoopOnce, Infinity);
+          a.clampWhenFinished = true;
+          a.play();
+          a.paused = true; // driven by the clock above, not the mixer
+          if (ownAction) a.crossFadeFrom(ownAction, 0.07, false);
+          ownAction = a;
+        }
+        const len = a.getClip().duration;
+        a.time = idle ? at % len : Math.min(at, len);
+        o.mixer.update(dt);
+        return;
+      }
       if (game === 'cs16') {
         const q = seq16(anim.clip);
         if (q) k16!.sample(q, idle ? at % (q.frames / q.fps) : at, idle);

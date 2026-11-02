@@ -365,6 +365,7 @@ export function createRenderer(canvas: HTMLCanvasElement) {
     setKnife16: (mdl: Parameters<typeof viewmodel.setKnife16>[0]) => viewmodel.setKnife16(mdl),
     attack: (kind: 'light' | 'heavy') => viewmodel.attack(kind),
     setFinish: (choice: Parameters<typeof viewmodel.setFinish>[0]) => viewmodel.setFinish(choice, renderer.extensions.has('EXT_texture_compression_bptc')),
+    setOwn: (...a: Parameters<typeof viewmodel.setOwn>) => viewmodel.setOwn(...a),
     setArms: (b: Parameters<typeof viewmodel.setArms>[0]) => viewmodel.setArms(b, renderer.extensions.has('EXT_texture_compression_bptc')),
     setGhost(pos: Vec3 | null) {
       ghost.visible = !!pos;

@@ -128,8 +128,8 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
                 <tr><td>Jump</td><td><button type="button" class="bindBtn" title="Click, then press a key or scroll"></button></td></tr>
                 <tr><td>Walk</td><td>Shift</td></tr>
                 <tr><td>Crouch</td><td>C</td></tr>
-                ${HOSTED ? '' : '<tr><td>Slash</td><td>Left click</td></tr>'}
-                ${HOSTED ? '' : '<tr><td>Stab</td><td>Right click</td></tr>'}
+                <tr><td>Slash</td><td>Left click</td></tr>
+                <tr><td>Stab</td><td>Right click</td></tr>
                 <tr class="cs2Only"><td>Inspect knife</td><td>F</td></tr>
                 <tr><td>Mark the finish (maps without one)</td><td>setgoal in the console</td></tr>
                 <tr><td>Restart run</td><td>R</td></tr>
@@ -140,6 +140,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
                 <tr><td>Open or close this menu</td><td>Esc</td></tr>
               </tbody>
             </table>
+            <p class="note credits">Arms: <a href="https://sketchfab.com/3d-models/none-296d30fc705b4dff85c2c8a2d2724e7f" target="_blank" rel="noopener">FREE [FPS Arms] GameReady - RIGGED</a> by bamenwo05. Knife: <a href="https://sketchfab.com/3d-models/none-554aac0e619e45f0a95b7c15cac7219c" target="_blank" rel="noopener">Karambit Knife</a> by ediirawan. Both <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>, posed and animated for this game.</p>
           </div>
         </form>
         <footer class="buttons"><button class="play" type="button">Play</button></footer>
@@ -166,7 +167,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     $('.tickHint').textContent = cur.game === 'cs16' ? `${gameLabel('cs16')} moves once per frame, at 100 fps.` : '';
     $('.tickHint').hidden = cur.game !== 'cs16';
     // CS 1.6 has one knife and no skins, and no inspect.
-    root.querySelectorAll<HTMLElement>('.cs2Only').forEach((e) => (e.hidden = HOSTED || cur.game === 'cs16'));
+    root.querySelectorAll<HTMLElement>('.cs2Only').forEach((e) => (e.hidden = cur.game === 'cs16'));
     $('#tab-knife').hidden = HOSTED || cur.game === 'cs16';
     if ((HOSTED || cur.game === 'cs16') && tab === 'knife') selectTab('map');
   };

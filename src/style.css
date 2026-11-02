@@ -220,3 +220,5 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #2a2f25; }
 
 /* Esc closed the menu: the mouse comes back with a click */
 .resumeHint { position: absolute; left: 50%; top: 58%; transform: translateX(-50%); margin: 0; padding: 6px 12px; background: rgb(0 0 0 / 0.45); color: var(--text); font: 700 14px/1.3 var(--font-ui); text-shadow: 1px 1px 0 #000; pointer-events: none; white-space: nowrap; }
+
+.credits a { color: inherit; text-decoration: underline; }

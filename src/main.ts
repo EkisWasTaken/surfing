@@ -1,5 +1,8 @@
 import './style.css';
-import { HOSTED, gameLabel, gameTitle, parseGame } from './hosted';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import modernModel from './assets/viewmodel/modern.glb?url';
+import retroModel from './assets/viewmodel/retro.glb?url';
+import { HOSTED, OWN_MODELS, gameLabel, gameTitle, parseGame } from './hosted';
 import { config } from './config';
 import { vec, add, sub, scale } from './math';
 import { maps as builtins, findMap } from './maps';
@@ -500,8 +503,11 @@ function applyFinish() {
 }
 // CS 1.6's knife and hands (v_knife.mdl from your Counter-Strike install, copied by the import).
 renderer.setGame(settings.game);
+const gltf = new GLTFLoader();
+gltf.load(modernModel, (g) => renderer.setOwn('csgo', g.scene, g.animations), undefined, (e) => console.warn('viewmodel:', e));
+gltf.load(retroModel, (g) => renderer.setOwn('cs16', g.scene, g.animations), undefined, (e) => console.warn('viewmodel:', e));
 // The public build has none of these files, so it doesn't ask for them.
-if (!HOSTED) {
+if (!OWN_MODELS) {
 fetch('/cs16/v_knife.mdl')
   .then((r) => (r.ok && !r.headers.get('content-type')?.includes('html') ? r.arrayBuffer() : null))
   .then((b) => b && renderer.setKnife16(parseMdl(b)))
