@@ -11,3 +11,4 @@ align/
 .dev.vars
 src-tauri/target
 src-tauri/gen
+worker/.group-code.txt

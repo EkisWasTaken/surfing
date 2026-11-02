@@ -5,4 +5,4 @@ compatibility_date = "2025-06-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "surf-leaderboard"
-database_id = "replace-with-the-id-from-wrangler-d1-create"
+database_id = "f154e417-a903-4ecc-9d15-03f41952f8ff"
