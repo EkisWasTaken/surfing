@@ -5,19 +5,20 @@ import type { GameMode } from './config';
 export const DESKTOP = typeof window !== 'undefined' && '__TAURI__' in window;
 export const STEAM = 'http://surfsteam.localhost'; // the desktop app's file service, see src-tauri/src/main.rs
 const REAL_KEY = 'surf-real-models';
-const readReal = () => {
+const realChoice = () => {
   try {
-    return localStorage.getItem(REAL_KEY) === '1';
+    return localStorage.getItem(REAL_KEY);
   } catch {
-    return false;
+    return 'off'; // nowhere to remember the choice: don't import on every launch
   }
 };
 // This player imported their own files. Read once: switching reloads the page.
-export const USING_REAL = DESKTOP && readReal();
+export const USING_REAL = DESKTOP && realChoice() === '1';
+// With CS found and nothing decided yet, the app imports by itself. 'off': they went back to built-in models, or it failed.
+export const REAL_UNDECIDED = DESKTOP && realChoice() === null;
 export const setUsingReal = (on: boolean) => {
   try {
-    if (on) localStorage.setItem(REAL_KEY, '1');
-    else localStorage.removeItem(REAL_KEY);
+    localStorage.setItem(REAL_KEY, on ? '1' : 'off');
   } catch {}
 };
 export const HOSTED = import.meta.env.PROD && !USING_REAL;

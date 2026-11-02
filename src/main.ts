@@ -3,7 +3,7 @@ import { GLTFLoader, GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import karambitModel from './assets/viewmodel/karambit.glb?url';
 import m9Model from './assets/viewmodel/m9.glb?url';
 import retroModel from './assets/viewmodel/retro.glb?url';
-import { HOSTED, OWN_MODELS, DESKTOP, USING_REAL, STEAM, assetUrl, setUsingReal, gameLabel, gameTitle, parseGame } from './hosted';
+import { HOSTED, OWN_MODELS, DESKTOP, USING_REAL, REAL_UNDECIDED, STEAM, assetUrl, setUsingReal, gameLabel, gameTitle, parseGame } from './hosted';
 import { config, modeDefault } from './config';
 import { vec, add, sub, scale, angleVectors, normalize } from './math';
 import { maps as builtins, findMap } from './maps';
@@ -800,6 +800,7 @@ type GameFolders = { csgo: string | null; halfLife: string | null };
 const gameFolders = (): Promise<GameFolders> => fetch(`${STEAM}/info`).then((r) => r.json());
 function importRealModels() {
   const fail = (why: string) => {
+    setUsingReal(USING_REAL); // a failed first import isn't retried on every launch; the button still can
     hud.loading(null);
     hud.setRealModels({ note: `Import failed: ${why}`, importLabel: 'Try again', canRemove: USING_REAL });
   };
@@ -839,7 +840,10 @@ if (DESKTOP) {
     .then((f) => {
       const found = [f.csgo && 'CS2/CS:GO', f.halfLife && 'CS 1.6'].filter(Boolean).join(' and ');
       if (USING_REAL) hud.setRealModels({ note: 'Using the knives, skins and maps from your own Counter-Strike. These files stay on this PC.', importLabel: 'Import again', canRemove: true });
-      else if (found) hud.setRealModels({ note: `Found ${found}. Importing uses the knives, skins and maps from your own copy, and takes about a minute. These files stay on this PC.`, importLabel: 'Import from my CS install', canRemove: false });
+      else if (found) {
+        hud.setRealModels({ note: `Found ${found}. Importing uses the knives, skins and maps from your own copy, and takes about a minute. These files stay on this PC.`, importLabel: 'Import from my CS install', canRemove: false });
+        if (REAL_UNDECIDED) importRealModels();
+      }
       else hud.setRealModels({ note: 'No Counter-Strike found in Steam, so the game uses its built-in models.', importLabel: null, canRemove: false });
     })
     .catch(() => {});
