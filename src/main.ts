@@ -15,6 +15,8 @@ import { readZip } from './pak';
 import type { VtexJson } from './cs2model';
 import { unb64 } from './b64';
 import licensedMaps from '../licensed-maps/manifest.json';
+import type { Track } from './records';
+import { createLeaderboard, playerId, WRONG_CODE } from './leaderboard';
 import { createGrid } from './grid';
 import { newPlayer, unstick, Player } from './movement';
 import { simTick, touching, newTickState } from './sim';
@@ -56,6 +58,7 @@ let records = loadRecords();
 let ghost: Ghost | null = null; // your best run on this map in this game
 let recording: number[] = []; // x, y, z, yaw per tick of the current run
 let practice = false; // a checkpoint teleport this run: it can't be a record
+let boardMap = ''; // the map picked on the Records tab; empty follows the map you're on
 let maxSpeed = 0;
 let typing = false; // chat or console input open
 let noclip = false; // console noclip: fly through walls (practice)
@@ -87,6 +90,7 @@ function respawn() {
 }
 
 function useMap(m: MapDef) {
+  boardMap = '';
   map = m;
   if (rival && rival.map !== m.id) rival = null;
   grid = createGrid(m.brushes);
@@ -103,6 +107,8 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
   settings,
   onPlay: input.requestLock,
   onCloseMenu: () => closeMenu(),
+  onBoardOpen: (mapId) => void showBoard(mapId),
+  onGroupJoin: (code) => void joinGroup(code),
   onChange(next: Settings) {
     const mapChanged = next.map !== settings.map, tickChanged = next.tickrate !== settings.tickrate || next.game !== settings.game;
     const gameChanged = next.game !== settings.game;
@@ -258,6 +264,69 @@ function runCommand(name: string, args: string[]) {
       return surf({ text: `!ghost on or off, !map <name> change map, !game ${HOSTED ? 'modern or classic' : 'cs16 or csgo'}, !setgoal mark the finish.` });
     default:
       return surf({ text: `Unknown command !${name}. Type !help for the list.`, tone: 'bad' });
+  }
+}
+
+// ---------- Friends' leaderboard ----------
+const board = createLeaderboard(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
+const me = playerId();
+// Only maps every friend has: not local or dropped-in ones.
+const onBoards = (id: string) => builtins.some((m) => m.id === id) || (id.startsWith('bsp:') && licensedUrl(id.slice(4)) !== undefined);
+let boardAsked = 0;
+async function showBoard(mapId = boardMap) {
+  if (!board) return;
+  const list = hud.mapList().filter((m) => onBoards(m.id));
+  boardMap = onBoards(mapId) ? mapId : onBoards(map.id) ? map.id : list[0].id;
+  const shown = boardMap, track = runTrack(), asked = ++boardAsked, def = builtins.find((m) => m.id === shown);
+  const put = (rows: { place: number; name: string; time: number; mine: boolean; medal: string | null }[], note: string) =>
+    hud.setBoard({ title: `Leaderboard: ${gameName()}${track === 'csgo128' ? ' 128-tick' : ''}`, maps: list, map: shown, rows, note });
+  if (!settings.groupCode) return put([], "Enter your group's code to see each other's times.");
+  put([], 'Loading…');
+  try {
+    const rows = await board.top(settings.groupCode, me, track, shown);
+    if (asked === boardAsked) put(rows.map((r) => ({ ...r, medal: def ? medalFor(def, r.time) : null })), rows.length ? '' : 'No times on this map yet.');
+  } catch (e) {
+    if (asked !== boardAsked) return;
+    put([], e instanceof Error && e.message === WRONG_CODE ? "That group code doesn't work any more. Ask for the new one." : "The leaderboard can't be reached right now. Your times still save here.");
+  }
+}
+// Sends every best on this browser, so runs from before joining, or while offline, reach the boards too.
+async function syncBoards() {
+  if (!board || !settings.groupCode) return;
+  try {
+    for (const [key, r] of Object.entries(records)) {
+      const at = key.indexOf(':'), track = key.slice(0, at) as Track, id = key.slice(at + 1);
+      if (onBoards(id)) await board.submit(settings.groupCode, me, player(), track, id, r.best);
+    }
+  } catch {} // tried again next time the game opens
+}
+async function joinGroup(typed: string) {
+  if (!board) return;
+  const code = typed.trim();
+  if (code) {
+    try {
+      await board.top(code, me, runTrack(), onBoards(map.id) ? map.id : builtins[0].id);
+    } catch (e) {
+      const wrong = e instanceof Error && e.message === WRONG_CODE;
+      return hud.setBoardNote(wrong ? "That isn't the group's code." : "The leaderboard can't be reached right now. Try again in a moment.");
+    }
+  }
+  hud.apply({ groupCode: code });
+  await syncBoards();
+  showBoard();
+}
+let finishNo = 0;
+// After a saved run: your best goes up (the database keeps the faster), and the finish screen shows where you stand.
+async function postBest(best: number) {
+  if (!board || !settings.groupCode || !onBoards(map.id)) return;
+  const asked = ++finishNo, track = runTrack(), id = map.id;
+  const say = (text: string) => void (asked === finishNo && finishShown && hud.setFinishBoard(text));
+  try {
+    await board.submit(settings.groupCode, me, player(), track, id, best);
+    const mine = (await board.top(settings.groupCode, me, track, id)).find((r) => r.mine);
+    if (mine) say(`Leaderboard: #${mine.place} of ${mine.players}`);
+  } catch {
+    say("Leaderboard not reached: it'll be sent next time.");
   }
 }
 
@@ -644,6 +713,7 @@ fetch('/maps/index.json')
   .catch(() => {}); // no dev server endpoint: built-in maps and file loading still work
 }
 
+syncBoards();
 input.onLockRefused(() => !menuClosed && hud.flash('Your browser needs a moment. Click Play again.'));
 input.setKeys(settings.keys);
 input.setFullscreen(settings.fullscreen);
@@ -804,6 +874,7 @@ function tick(cmd: ReturnType<typeof input.cmd>, tickDt: number) {
       announceFinish(r);
       showFinish(r.kind === 'first' ? 'First record!' : r.kind === 'pb' ? 'New personal best!' : 'Finished', [r.kind === 'first' ? '' : `${signed(r.delta)} vs your best`, medalFor(map, run.time) ? `${medalFor(map, run.time)} medal` : '', rival ? `${signed(run.time - rival.time)} vs ${rival.name}` : ''].filter(Boolean).join('   '), r.kind === 'slower' ? 'bad' : 'good');
       refreshRecords();
+      postBest(r.record.best);
       // A new best becomes the ghost you race next time.
       const g = r.kind !== 'slower' ? ghostFromTicks(recording, tickDt) : null;
       if (g) saveGhost(runTrack(), map.id, (ghost = g));

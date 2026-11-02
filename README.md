@@ -38,6 +38,25 @@ The build leaves out `public/`, where imported Steam files live, so `dist` is al
 - **Replay:** watch your best run from behind, from the Records tab.
 - **Checkpoints:** 1 saves, 2 returns, 3 steps back through earlier ones (practice runs).
 
+## Leaderboard
+
+Each map has a leaderboard for you and your friends, on the Records tab. Modern, Classic and 128-tick have separate boards, and only saved runs count. Without the setup below the game works the same, with no leaderboard.
+
+1. In the Supabase SQL editor, run [supabase/leaderboard.sql](supabase/leaderboard.sql).
+2. Set your group's code, and share it with your friends. To change it later, run this again.
+
+   ```sql
+   insert into public.leaderboard_group (code) values ('pick-a-long-code')
+   on conflict (only_row) do update set code = excluded.code;
+   ```
+
+3. Give the game your project's URL and its anon (or publishable) key, from Project Settings > API. Never the service_role key.
+   - For local builds, copy `.env.example` to `.env.local` and fill it in.
+   - For the hosted game, add them as repository variables named `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
+4. In the game, enter the code on the Records tab.
+
+The game reports its own times, so the code keeps strangers out but can't stop someone in the group from faking one. To remove a time, delete its row in the Supabase table editor. Free Supabase projects pause when unused; the board shows as unavailable until you restore the project in Supabase.
+
 ## Adding maps
 
 The hosted game can ship other people's maps if they've said yes. See [licensed-maps/README.md](licensed-maps/README.md).

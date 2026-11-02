@@ -6,3 +6,4 @@ public/cs2
 public/cs16
 
 align/
+.env*.local

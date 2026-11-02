@@ -9,6 +9,8 @@ type HudOptions = {
   onChange: (s: Settings) => void;
   onPlay: () => void;
   onCloseMenu: () => void;
+  onBoardOpen: (mapId?: string) => void;
+  onGroupJoin: (code: string) => void;
   onLoadFile: (file: File) => void;
   onShareCopy: () => void;
   onShareLoad: (code: string) => void;
@@ -82,6 +84,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       <h2 class="finishTitle"></h2>
       <p class="finishTime"></p>
       <p class="finishDetail"></p>
+      <p class="finishBoard"></p>
       <p class="finishKeys"></p>
     </section>
     <div class="start">
@@ -152,6 +155,21 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
             </div>
           </div>
           <div class="sheet" role="tabpanel" id="sheet-records" aria-labelledby="tab-records" hidden>
+            <div class="board" hidden>
+              <div class="boardHead">
+                <p class="boardTitle"></p>
+                <select class="boardMap" aria-label="Leaderboard map"></select>
+              </div>
+              <table class="keylist boardRows" hidden>
+                <thead><tr><th scope="col">#</th><th scope="col">Player</th><th scope="col">Time</th><th scope="col">Medal</th></tr></thead>
+                <tbody></tbody>
+              </table>
+              <p class="note boardNote" role="status"></p>
+              <div class="shareRow">
+                <input class="groupCode" type="text" placeholder="Group code" autocomplete="off" spellcheck="false" aria-label="Group code" />
+                <button type="button" class="button groupJoin">Join</button>
+              </div>
+            </div>
             <p class="recordsTitle"></p>
             <p class="note noRecords">Finish a map to set your first record. Times are kept separately for ${gameLabel('csgo')} and ${gameLabel('cs16')}.</p>
             <table class="keylist records" hidden>
@@ -246,6 +264,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     try {
       localStorage.setItem('surf-menu-tab', id);
     } catch {}
+    if (id === 'records' && !overlay.hidden) opts.onBoardOpen();
   };
   tabButtons.forEach((b) => b.addEventListener('click', () => selectTab(b.dataset.tab!)));
   $('.tabs').addEventListener('keydown', (e) => {
@@ -340,8 +359,18 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     optionsFromStart = true;
     start.hidden = true;
     overlay.hidden = false;
+    if (tab === 'records') opts.onBoardOpen();
   });
   const finishPanel = $('.finishPanel');
+  const boardMap = $<HTMLSelectElement>('.boardMap'), groupCode = $<HTMLInputElement>('.groupCode');
+  groupCode.value = cur.groupCode;
+  boardMap.addEventListener('change', () => opts.onBoardOpen(boardMap.value));
+  $('.groupJoin').addEventListener('click', () => opts.onGroupJoin(groupCode.value));
+  groupCode.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    opts.onGroupJoin(groupCode.value);
+  });
   $('.shareCopy').addEventListener('click', opts.onShareCopy);
   $('.replayBtn').addEventListener('click', opts.onReplay);
   $('.shareLoad').addEventListener('click', () => opts.onShareLoad($<HTMLInputElement>('.shareInput').value.trim()));
@@ -579,7 +608,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
         }),
       );
       $('.recent').hidden = recent.length === 0;
-      $('.recentTitle').textContent = `Last finishes on ${mapLabel(currentId)}`;
+      $('.recent .recentTitle').textContent = `Last finishes on ${mapLabel(currentId)}`;
       $('.recentList').replaceChildren(
         ...recent.map((f) => {
           const li = document.createElement('li');
@@ -592,8 +621,31 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       speedVal.textContent = String(Math.round(u));
       speedVal.dataset.tier = u >= 3000 ? '3' : u >= 2000 ? '2' : u >= 1000 ? '1' : '';
     },
+    // One map's leaderboard. rows stay out of the way (empty) while note says what's going on.
+    setBoard(b: { title: string; maps: { id: string; name: string }[]; map: string; rows: { place: number; name: string; time: number; mine: boolean; medal: string | null }[]; note: string }) {
+      $('.board').hidden = false;
+      $('.boardTitle').textContent = b.title;
+      if (boardMap.options.length !== b.maps.length) boardMap.replaceChildren(...b.maps.map((m) => new Option(m.name, m.id)));
+      boardMap.value = b.map;
+      $('.boardNote').textContent = b.note;
+      const table = $('.boardRows');
+      table.hidden = b.rows.length === 0;
+      table.querySelector('tbody')!.replaceChildren(
+        ...b.rows.map((r) => {
+          const tr = document.createElement('tr');
+          if (r.mine) tr.className = 'current';
+          for (const text of [String(r.place), r.name, formatTime(r.time), r.medal ?? '']) tr.insertCell().textContent = text;
+          return tr;
+        }),
+      );
+    },
+    setBoardNote: (text: string) => ($('.boardNote').textContent = text),
+    setFinishBoard: (text: string) => ($('.finishBoard').textContent = text),
     setShareNote: (msg: string) => ($('.shareNote').textContent = msg),
-    showOverlay: (show: boolean) => (overlay.hidden = !show),
+    showOverlay(show: boolean) {
+      overlay.hidden = !show;
+      if (show && tab === 'records') opts.onBoardOpen();
+    },
     startOpen: () => !start.hidden,
     showStart(show: boolean) {
       start.hidden = !show;
@@ -609,6 +661,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     // The end of a run. The mouse is locked in play, so its actions are keys.
     showFinish(f: { title: string; time: string; detail: string; speed: number; tone: 'good' | 'bad'; next: string | null } | null) {
       finishPanel.hidden = !f;
+      $('.finishBoard').textContent = '';
       if (!f) return;
       $('.finishTitle').textContent = f.title;
       $('.finishTime').textContent = f.time;
