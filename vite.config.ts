@@ -1,9 +1,12 @@
 import { defineConfig } from 'vite';
 import { readdirSync } from 'node:fs';
 
-// Lists the .bsp files in public/maps so the menu can offer them without a hand-kept index.
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  // public/ only holds files imported from Steam (maps, knives): never copied into the public build.
+  publicDir: command === 'build' ? false : 'public',
+  base: './', // works from any folder, e.g. username.github.io/surfing/
   plugins: [
+    // Lists the .bsp files in public/maps so the menu can offer them without a hand-kept index.
     {
       name: 'maps-index',
       configureServer(server) {
@@ -18,4 +21,4 @@ export default defineConfig({
       },
     },
   ],
-});
+}));

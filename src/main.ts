@@ -1,4 +1,5 @@
 import './style.css';
+import { HOSTED, gameLabel, gameTitle, parseGame } from './hosted';
 import { config } from './config';
 import { vec, add, sub, scale } from './math';
 import { maps as builtins, findMap } from './maps';
@@ -108,7 +109,7 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
 });
 
 // Chat and records: CS server-style lines for map changes and finishes.
-const gameName = () => (settings.game === 'cs16' ? 'CS 1.6' : 'CS:GO');
+const gameName = () => gameLabel(settings.game);
 const mapShort = (m: MapDef) => (m.id.startsWith('bsp:') ? m.id.slice(4).replace(/\.bsp$/i, '') : m.name);
 const player = () => settings.name.trim() || 'Player';
 const signed = (d: number) => `${d < 0 ? '-' : '+'}${formatTime(Math.abs(d))}`;
@@ -184,8 +185,8 @@ function runCommand(name: string, args: string[]) {
       hud.apply({ showGhost: !settings.showGhost });
       return surf({ text: settings.showGhost ? (ghost ? 'Ghost on: race your best run.' : 'Ghost on. Set a record here and it will race you next time.') : 'Ghost off.' });
     case 'game': {
-      const a = (args[0] ?? '').toLowerCase(), g = /1\.?6/.test(a) ? 'cs16' : /go|cs2/.test(a) ? 'csgo' : null;
-      if (!g) return surf({ text: 'Usage: !game cs16 or !game csgo', tone: 'bad' });
+      const g = parseGame(args[0] ?? '');
+      if (!g) return surf({ text: `Usage: !game ${HOSTED ? 'modern or !game classic' : 'cs16 or !game csgo'}`, tone: 'bad' });
       return hud.apply({ game: g });
     }
     case 'map': case 'nominate': {
@@ -197,7 +198,7 @@ function runCommand(name: string, args: string[]) {
       return setGoal(surfLine);
     case 'help': case 'commands':
       surf({ text: 'Commands: !r restart, !pb your best, !cp save a checkpoint, !tele go back to it (practice),' });
-      return surf({ text: '!ghost on or off, !map <name> change map, !game cs16 or csgo, !setgoal mark the finish.' });
+      return surf({ text: `!ghost on or off, !map <name> change map, !game ${HOSTED ? 'modern or classic' : 'cs16 or csgo'}, !setgoal mark the finish.` });
     default:
       return surf({ text: `Unknown command !${name}. Type !help for the list.`, tone: 'bad' });
   }
@@ -294,15 +295,15 @@ con.cvar('sv_autobunnyhopping', 'Auto bunnyhop (0/1)', {
 con.cvar('sensitivity', 'Mouse sensitivity', { get: () => String(settings.sensitivity), def: () => '2', set: num(0.01, 20, (n) => hud.apply({ sensitivity: n })) });
 for (const name of ['fov_desired', 'default_fov']) con.cvar(name, 'Field of view', { get: () => String(settings.fov), def: () => '90', set: num(60, 130, (n) => hud.apply({ fov: n })) });
 con.cvar('name', 'Your chat name', { get: () => settings.name, set: (v) => (v.trim() ? void hud.apply({ name: v.trim().slice(0, 31) }) : 'name cannot be empty') });
-con.cvar('game', 'csgo or cs16', {
-  get: () => settings.game,
-  def: () => 'csgo',
-  set: (v) => (v === 'csgo' || v === 'cs16' ? void hud.apply({ game: v }) : 'expects csgo or cs16'),
+con.cvar('game', HOSTED ? 'modern or classic' : 'csgo or cs16', {
+  get: () => (HOSTED ? gameLabel(settings.game).toLowerCase() : settings.game),
+  def: () => (HOSTED ? 'modern' : 'csgo'),
+  set: (v) => (parseGame(v) ? void hud.apply({ game: parseGame(v)! }) : `expects ${HOSTED ? 'modern or classic' : 'csgo or cs16'}`),
 });
-con.cvar('tickrate', '64 or 128 (CS:GO only)', {
+con.cvar('tickrate', `64 or 128 (${gameLabel('csgo')} only)`, {
   get: () => String(config.tickrate),
   def: () => (settings.game === 'cs16' ? '100' : '64'),
-  set: (v) => (settings.game === 'cs16' ? 'CS 1.6 always runs at 100 fps' : v === '64' || v === '128' ? void hud.apply({ tickrate: v === '128' ? 128 : 64 }) : 'expects 64 or 128'),
+  set: (v) => (settings.game === 'cs16' ? `${gameLabel('cs16')} always runs at 100 fps` : v === '64' || v === '128' ? void hud.apply({ tickrate: v === '128' ? 128 : 64 }) : 'expects 64 or 128'),
 });
 con.cvar('cl_showfps', 'Show FPS (0/1)', { get: () => (showFps ? '1' : '0'), def: () => '0', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void (showFps = bool(v)!)) });
 con.cvar('cl_showspeed', 'Show speed (0/1)', { get: () => (settings.showSpeed ? '1' : '0'), def: () => '1', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void hud.apply({ showSpeed: bool(v)! })) });
@@ -384,7 +385,7 @@ if (!wantedMap.startsWith('bsp:')) announceMap(); // folder maps announce once t
 // Loading dialog steps; yields a frame between heavy steps so the bar actually paints.
 const nextFrame = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 const showLoading = (mapName: string, step: string, fraction: number) =>
-  hud.loading({ game: settings.game === 'cs16' ? 'Counter-Strike' : 'Counter-Strike: Global Offensive', map: mapName.replace(/\.bsp$/i, ''), step, fraction });
+  hud.loading({ game: gameTitle(settings.game), map: mapName.replace(/\.bsp$/i, ''), step, fraction });
 async function download(url: string, onProgress: (f: number) => void): Promise<Response & { bytes: ArrayBuffer }> {
   const res = await fetch(url);
   const total = Number(res.headers.get('content-length')) || 0;
@@ -429,7 +430,7 @@ async function loadBsp(read: () => Promise<ArrayBuffer>, name: string, stock?: M
     refreshRecords();
     const goal = m.goalFromMap ? 'goal found in map' : m.endZone ? 'using your saved goal' : 'no finish in map: type setgoal in the console (or !setgoal in chat) at the finish';
     // Texture report so a missing-texture problem shows what happened (decode path, GPU support).
-    const texNote = tex ? ` Textures: ${tex.gpu + tex.cpu} loaded${tex.cpu ? ` (${tex.cpu} decoded on CPU: no GPU texture compression)` : ''}, ${tex.missing} missing${tex.missing && !stock ? ' (stock CS:GO: run npm run import-maps with CS:GO legacy installed)' : ''}.` : '';
+    const texNote = tex ? ` Textures: ${tex.gpu + tex.cpu} loaded${tex.cpu ? ` (${tex.cpu} decoded on CPU: no GPU texture compression)` : ''}, ${tex.missing} missing${tex.missing && !stock && !HOSTED ? ' (stock CS:GO: run npm run import-maps with CS:GO legacy installed)' : ''}.` : '';
     hud.setStatus(`Loaded ${m.brushes.length} brushes, ${m.teleports.length} teleports, ${m.pushes.length} boosters; ${goal}.${texNote}`);
   } catch (e) {
     hud.setStatus(e instanceof Error ? e.message : String(e), true);
@@ -499,6 +500,8 @@ function applyFinish() {
 }
 // CS 1.6's knife and hands (v_knife.mdl from your Counter-Strike install, copied by the import).
 renderer.setGame(settings.game);
+// The public build has none of these files, so it doesn't ask for them.
+if (!HOSTED) {
 fetch('/cs16/v_knife.mdl')
   .then((r) => (r.ok && !r.headers.get('content-type')?.includes('html') ? r.arrayBuffer() : null))
   .then((b) => b && renderer.setKnife16(parseMdl(b)))
@@ -525,7 +528,8 @@ fetch('/maps/index.json')
     for (const f of files) hud.addMap({ id: `bsp:${f}`, name: `CS:GO: ${f.replace(/\.bsp$/i, '')}` }, false);
     if (wantedMap.startsWith('bsp:') && files.includes(wantedMap.slice(4))) loadFolderMap(wantedMap.slice(4));
   })
-  .catch(() => {}); // no dev server endpoint (e.g. static build): built-in maps and file loading still work
+  .catch(() => {}); // no dev server endpoint: built-in maps and file loading still work
+}
 
 // Esc closed the menu, but browsers don't hand the mouse back on Esc: the game waits for a click.
 let menuClosed = false;

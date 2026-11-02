@@ -1,4 +1,5 @@
 import type { Settings } from './settings';
+import { HOSTED, gameLabel } from './hosted';
 import { formatTime } from './timer';
 import { bindLabel, wheelCode } from './input';
 
@@ -81,7 +82,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
           </div>
           <div class="sheet" role="tabpanel" id="sheet-movement" aria-labelledby="tab-movement" hidden>
             <label class="row"><span>Game</span>
-              <select name="game"><option value="csgo">CS:GO</option><option value="cs16">CS 1.6</option></select>
+              <select name="game"><option value="csgo">${gameLabel('csgo')}</option><option value="cs16">${gameLabel('cs16')}</option></select>
             </label>
             <p class="note">Switches movement rules, knife and HUD together. Changing it restarts your run.</p>
             <label class="row"><span>Tickrate</span>
@@ -109,7 +110,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
           </div>
           <div class="sheet" role="tabpanel" id="sheet-records" aria-labelledby="tab-records" hidden>
             <p class="recordsTitle"></p>
-            <p class="note noRecords">Finish a map to set your first record. Times are kept separately for CS:GO and CS 1.6.</p>
+            <p class="note noRecords">Finish a map to set your first record. Times are kept separately for ${gameLabel('csgo')} and ${gameLabel('cs16')}.</p>
             <table class="keylist records" hidden>
               <thead><tr><th scope="col">Map</th><th scope="col">Best</th><th scope="col">Finishes</th><th scope="col">Set on</th></tr></thead>
               <tbody></tbody>
@@ -127,8 +128,8 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
                 <tr><td>Jump</td><td><button type="button" class="bindBtn" title="Click, then press a key or scroll"></button></td></tr>
                 <tr><td>Walk</td><td>Shift</td></tr>
                 <tr><td>Crouch</td><td>C</td></tr>
-                <tr><td>Slash</td><td>Left click</td></tr>
-                <tr><td>Stab</td><td>Right click</td></tr>
+                ${HOSTED ? '' : '<tr><td>Slash</td><td>Left click</td></tr>'}
+                ${HOSTED ? '' : '<tr><td>Stab</td><td>Right click</td></tr>'}
                 <tr class="cs2Only"><td>Inspect knife</td><td>F</td></tr>
                 <tr><td>Mark the finish (maps without one)</td><td>setgoal in the console</td></tr>
                 <tr><td>Restart run</td><td>R</td></tr>
@@ -160,14 +161,14 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   // The whole UI wears the chosen game's look: CS 1.6 VGUI or CS:GO.
   const showGame = () => {
     root.dataset.game = cur.game;
-    $('.gameName').textContent = cur.game === 'cs16' ? 'Counter-Strike 1.6' : 'CS:GO';
+    $('.gameName').textContent = gameLabel(cur.game);
     el.tickrate.disabled = cur.game === 'cs16';
-    $('.tickHint').textContent = cur.game === 'cs16' ? 'CS 1.6 moves once per frame, at 100 fps.' : '';
+    $('.tickHint').textContent = cur.game === 'cs16' ? `${gameLabel('cs16')} moves once per frame, at 100 fps.` : '';
     $('.tickHint').hidden = cur.game !== 'cs16';
     // CS 1.6 has one knife and no skins, and no inspect.
-    root.querySelectorAll<HTMLElement>('.cs2Only').forEach((e) => (e.hidden = cur.game === 'cs16'));
-    $('#tab-knife').hidden = cur.game === 'cs16';
-    if (cur.game === 'cs16' && tab === 'knife') selectTab('map');
+    root.querySelectorAll<HTMLElement>('.cs2Only').forEach((e) => (e.hidden = HOSTED || cur.game === 'cs16'));
+    $('#tab-knife').hidden = HOSTED || cur.game === 'cs16';
+    if ((HOSTED || cur.game === 'cs16') && tab === 'knife') selectTab('map');
   };
   // Tabs: click or arrow keys; the open tab is remembered on this device.
   const tabButtons = [...root.querySelectorAll<HTMLButtonElement>('[role=tab]')];
@@ -195,7 +196,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   try {
     saved = localStorage.getItem('surf-menu-tab');
   } catch {}
-  selectTab(TABS.some((t) => t.id === saved) ? saved! : 'map');
+  selectTab(TABS.some((t) => t.id === saved) && !(HOSTED && saved === 'knife') ? saved! : 'map');
   showGame();
   el.autobhop.checked = cur.autobhop;
   el.showSpeed.checked = cur.showSpeed;

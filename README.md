@@ -4,7 +4,18 @@ A browser surf game that plays like Counter-Strike: real CS:GO and CS 1.6 moveme
 
 No game files are included. The game reads maps, knives and textures from your own Steam installs through a local import step, and that output stays on your machine (git-ignored).
 
-## Features
+## Two versions
+
+- **The hosted game** is what `npm run build` produces and what GitHub Pages serves. It's instantly playable from a link, with 6 original maps and nothing from Steam: no knives, skins or Valve textures. The two movement modes are called Modern and Classic. Anyone can still open a `.bsp` they already have with "Load .bsp file"; it stays in their own browser.
+- **The local version** (`npm run dev` after `npm run import-maps`) has everything below, read from your own Steam installs.
+
+### Hosting it
+
+Every push to `master` tests, builds and deploys through `.github/workflows/deploy.yml`. Turn it on once in the repo: **Settings → Pages → Source → GitHub Actions**. The game is then at `https://<username>.github.io/<repo>/`.
+
+The build leaves out `public/`, where imported Steam files live, so `dist` is also safe to upload to any static host.
+
+## Features (local version)
 
 - **Two movement modes, switched with one setting.**
   - **CS:GO** is a port of Source's `CGameMovement`: airaccelerate 150 for surf, 64 or 128 tick, edge friction, and teleports that keep velocity.
@@ -28,7 +39,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173. Three built-in practice maps work right away. For real maps, knives and skins, import them from your Steam installs:
+Open http://localhost:5173. Six built-in maps work right away. For real maps, knives and skins, import them from your Steam installs:
 
 ```bash
 npm run import-maps
