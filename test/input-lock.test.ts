@@ -74,6 +74,12 @@ describe('refused lock requests', () => {
     vi.advanceTimersByTime(250);
     expect(canvas.requestPointerLock).toHaveBeenCalledOnce();
   });
+  it('ask for a plain lock when raw input is switched off', () => {
+    const input = createInput(canvas as unknown as HTMLCanvasElement);
+    input.setRawInput(false);
+    input.requestLock();
+    expect(canvas.requestPointerLock.mock.calls[0][0]).toBeUndefined();
+  });
   it('drop raw input only where the browser lacks it', async () => {
     const input = createInput(canvas as unknown as HTMLCanvasElement);
     canvas.requestPointerLock.mockImplementationOnce(() => Promise.reject(Object.assign(new Error(), { name: 'NotSupportedError' })));

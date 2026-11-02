@@ -113,6 +113,7 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
     renderer.setShowViewmodel(next.showViewmodel);
     input.setJumpBind(next.jumpBind);
     input.setFullscreen(next.fullscreen);
+    input.setRawInput(next.rawInput);
     input.setKeys(next.keys);
     renderer.setFov(next.fov);
     if (tickChanged) acc = createAccumulator(1 / config.tickrate);
@@ -365,6 +366,7 @@ con.cvar('tickrate', `64 or 128 (${gameLabel('csgo')} only)`, {
   set: (v) => (settings.game === 'cs16' ? `${gameLabel('cs16')} always runs at 100 fps` : v === '64' || v === '128' ? void hud.apply({ tickrate: v === '128' ? 128 : 64 }) : 'expects 64 or 128'),
 });
 con.cvar('cl_showfps', 'Show FPS (0/1)', { get: () => (showFps ? '1' : '0'), def: () => '0', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void (showFps = bool(v)!)) });
+con.cvar('m_rawinput', 'Raw mouse input (0/1)', { get: () => (settings.rawInput ? '1' : '0'), def: () => '1', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void hud.apply({ rawInput: bool(v)! })) });
 con.cvar('cl_showspeed', 'Show speed (0/1)', { get: () => (settings.showSpeed ? '1' : '0'), def: () => '1', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void hud.apply({ showSpeed: bool(v)! })) });
 con.cvar('r_drawviewmodel', 'Show arms and knife (0/1)', { get: () => (settings.showViewmodel ? '1' : '0'), def: () => '1', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void hud.apply({ showViewmodel: bool(v)! })) });
 con.cvar('cl_ghost', 'Ghost of your best (0/1)', { get: () => (settings.showGhost ? '1' : '0'), def: () => '1', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void hud.apply({ showGhost: bool(v)! })) });
@@ -644,6 +646,7 @@ fetch('/maps/index.json')
 input.onLockRefused(() => !menuClosed && hud.flash('Your browser needs a moment. Click Play again.'));
 input.setKeys(settings.keys);
 input.setFullscreen(settings.fullscreen);
+input.setRawInput(settings.rawInput);
 
 // Watch your best run from behind. Any key ends it.
 function startReplay() {

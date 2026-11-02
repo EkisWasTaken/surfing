@@ -113,6 +113,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
             </label>
             <p class="note tickHint"></p>
             <label class="row"><span>Mouse sensitivity</span><input name="sensitivity" type="number" min="0.01" max="20" step="0.01" /></label>
+            <label class="row check"><input name="rawInput" type="checkbox" /><span>Raw mouse input</span></label>
             <label class="row check"><input name="autobhop" type="checkbox" /><span>Jump again automatically while holding jump</span></label>
           </div>
           <div class="sheet" role="tabpanel" id="sheet-display" aria-labelledby="tab-display" hidden>
@@ -252,6 +253,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   el.showGhost.checked = cur.showGhost;
   el.showViewmodel.checked = cur.showViewmodel;
   el.speedFx.checked = cur.speedFx;
+  el.rawInput.checked = cur.rawInput;
   el.fullscreen.checked = cur.fullscreen;
   if (!('keyboard' in navigator)) el.fullscreen.closest('label')!.style.display = 'none';
   el.hudScale.value = String(cur.hudScale);
@@ -292,6 +294,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       showGhost: el.showGhost.checked,
       showViewmodel: el.showViewmodel.checked,
       speedFx: el.speedFx.checked,
+      rawInput: el.rawInput.checked,
       fullscreen: el.fullscreen.checked,
       hudScale: Number(el.hudScale.value),
       knife: el.knife.value || cur.knife,

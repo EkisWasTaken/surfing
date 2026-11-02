@@ -124,6 +124,7 @@ export function createInput(canvas: HTMLCanvasElement) {
     locked,
     requestLock,
     cancelLock: () => (retryUntil = 0),
+    setRawInput: (on: boolean) => (raw = on), // used from the next time the mouse is taken
     // Only where Esc can be held for the game; elsewhere fullscreen would just drop on every Esc.
     setFullscreen(on: boolean) {
       fullscreen = on && 'keyboard' in navigator;
