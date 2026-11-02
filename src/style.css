@@ -252,6 +252,9 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #2a2f25; }
 .finishBoard:empty { display: none; }
 .boardHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .boardTitle { white-space: nowrap; }
+.realModels { margin-top: 10px; }
+.realModels .note { margin: 4px 0; max-width: none; }
+.realModels .button[hidden] { display: none; }
 .overlay .buttons { gap: 8px; }
 .overlay .quitGame { margin-right: auto; }
 .board { margin-bottom: 12px; }

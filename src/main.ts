@@ -3,7 +3,7 @@ import { GLTFLoader, GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import karambitModel from './assets/viewmodel/karambit.glb?url';
 import m9Model from './assets/viewmodel/m9.glb?url';
 import retroModel from './assets/viewmodel/retro.glb?url';
-import { HOSTED, OWN_MODELS, gameLabel, gameTitle, parseGame } from './hosted';
+import { HOSTED, OWN_MODELS, DESKTOP, USING_REAL, STEAM, assetUrl, setUsingReal, gameLabel, gameTitle, parseGame } from './hosted';
 import { config, modeDefault } from './config';
 import { vec, add, sub, scale, angleVectors, normalize } from './math';
 import { maps as builtins, findMap } from './maps';
@@ -108,6 +108,8 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
   settings,
   onPlay: input.requestLock,
   onCloseMenu: () => closeMenu(),
+  onRealImport: () => importRealModels(),
+  onRealRemove: () => void removeRealModels(),
   onQuit: tauri ? () => void tauri.core.invoke('quit') : null,
   onBoardOpen: (mapId) => void showBoard(mapId),
   onGroupJoin: (code) => void joinGroup(code),
@@ -588,13 +590,13 @@ async function loadFolderMap(file: string) {
     }, file);
   }
   showLoading(file, 'Retrieving stock textures…', 0);
-  const zip = await download(`/maps/${encodeURIComponent(file.replace(/.bsp$/i, '.stock.zip'))}`, (f) => showLoading(file, 'Retrieving stock textures…', f * 0.2)).catch(() => null);
+  const zip = await download(assetUrl(`/maps/${encodeURIComponent(file.replace(/.bsp$/i, '.stock.zip'))}`), (f) => showLoading(file, 'Retrieving stock textures…', f * 0.2)).catch(() => null);
   // The dev server answers unknown paths with its HTML page, which reads as an empty zip: treat that as no bundle.
   const files = zip?.ok ? readZip(new Uint8Array(zip.bytes)) : new Map<string, Uint8Array>();
   const stock = files.size ? files : undefined;
   return loadBsp(
     async () => {
-      const res = await download(`/maps/${encodeURIComponent(file)}`, (f) => showLoading(file, 'Downloading map…', 0.2 + f * 0.45));
+      const res = await download(assetUrl(`/maps/${encodeURIComponent(file)}`), (f) => showLoading(file, 'Downloading map…', 0.2 + f * 0.45));
       if (!res.ok) throw new Error(`${file} isn't in the maps folder anymore`);
       return res.bytes;
     },
@@ -604,7 +606,7 @@ async function loadFolderMap(file: string) {
 }
 
 // CS2's arms and knives, decoded by `npm run import-maps` from the local CS2 install (absent → no viewmodel).
-const json = (url: string) => fetch(url).then((r) => (r.ok && r.headers.get('content-type')?.includes('json') ? r.json() : null));
+const json = (url: string) => fetch(assetUrl(url)).then((r) => (r.ok && r.headers.get('content-type')?.includes('json') ? r.json() : null));
 /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
 type Any = any;
 let knives: { id: string; name: string; finishes: string[] }[] = [];
@@ -686,7 +688,7 @@ for (const m of licensedMaps as { file: string; name: string; author: string; pe
 if (wantedMap.startsWith('bsp:') && licensedUrl(wantedMap.slice(4))) loadFolderMap(wantedMap.slice(4));
 // The public build has none of these files, so it doesn't ask for them.
 if (!OWN_MODELS) {
-fetch('/cs16/v_knife.mdl')
+fetch(assetUrl('/cs16/v_knife.mdl'))
   .then((r) => (r.ok && !r.headers.get('content-type')?.includes('html') ? r.arrayBuffer() : null))
   .then(async (b) => b && renderer.setKnife16((await import('./goldsrcmdl')).parseMdl(b)))
   .catch((e) => console.warn('CS 1.6 knife:', e));
@@ -706,13 +708,57 @@ json('/cs2/finishes/index.json')
   })
   .catch(() => {});
 
-fetch('/maps/index.json')
+fetch(assetUrl('/maps/index.json'))
   .then((r) => (r.ok ? r.json() : []))
   .then((files: string[]) => {
     for (const f of files) hud.addMap({ id: `bsp:${f}`, name: `CS:GO: ${f.replace(/\.bsp$/i, '')}` }, false);
     if (wantedMap.startsWith('bsp:') && files.includes(wantedMap.slice(4))) loadFolderMap(wantedMap.slice(4));
   })
   .catch(() => {}); // no dev server endpoint: built-in maps and file loading still work
+}
+
+// Desktop app only: real models, knives, skins and maps from the player's own CS install.
+type GameFolders = { csgo: string | null; halfLife: string | null };
+const gameFolders = (): Promise<GameFolders> => fetch(`${STEAM}/info`).then((r) => r.json());
+function importRealModels() {
+  const fail = (why: string) => {
+    hud.loading(null);
+    hud.setRealModels({ note: `Import failed: ${why}`, importLabel: 'Try again', canRemove: USING_REAL });
+  };
+  showImport('Looking for Counter-Strike…', 0);
+  gameFolders().then((folders) => {
+    const worker = new Worker(new URL('./steam-import.worker.ts', import.meta.url), { type: 'module' });
+    let fraction = 0;
+    worker.onerror = (e) => (worker.terminate(), fail(e.message));
+    worker.onmessage = (e) => {
+      const m = e.data as { line?: string; fraction?: number; done?: { knives: number; cs16: boolean; maps: number }; error?: string };
+      fraction = m.fraction ?? fraction;
+      if (m.line) showImport(m.line, fraction);
+      if (m.error) return worker.terminate(), fail(m.error);
+      if (!m.done) return;
+      worker.terminate();
+      if (!m.done.knives && !m.done.cs16) return fail('no usable Counter-Strike files were found.');
+      setUsingReal(true);
+      location.reload();
+    };
+    worker.postMessage(folders);
+  }).catch((e) => fail(String(e)));
+}
+const showImport = (step: string, fraction: number) => hud.loading({ game: 'Real CS models', map: 'Reading your Counter-Strike files', step, fraction });
+async function removeRealModels() {
+  setUsingReal(false);
+  await fetch(`${STEAM}/clear`, { method: 'POST' }).catch(() => {});
+  location.reload();
+}
+if (DESKTOP) {
+  gameFolders()
+    .then((f) => {
+      const found = [f.csgo && 'CS2/CS:GO', f.halfLife && 'CS 1.6'].filter(Boolean).join(' and ');
+      if (USING_REAL) hud.setRealModels({ note: 'Using the knives, skins and maps from your own Counter-Strike. These files stay on this PC.', importLabel: 'Import again', canRemove: true });
+      else if (found) hud.setRealModels({ note: `Found ${found}. Importing uses the knives, skins and maps from your own copy, and takes about a minute. These files stay on this PC.`, importLabel: 'Import from my CS install', canRemove: false });
+      else hud.setRealModels({ note: 'No Counter-Strike found in Steam, so the game uses its built-in models.', importLabel: null, canRemove: false });
+    })
+    .catch(() => {});
 }
 
 syncBoards();

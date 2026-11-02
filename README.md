@@ -38,6 +38,12 @@ The build leaves out `public/`, where imported Steam files live, so `dist` is al
 - **Replay:** watch your best run from behind, from the Records tab.
 - **Checkpoints:** 1 saves, 2 returns, 3 steps back through earlier ones (practice runs).
 
+## Desktop app
+
+`npm run app` builds a small Windows app around the hosted game (needs Rust and the Visual Studio C++ tools). If the project path is long, set `CARGO_TARGET_DIR` to a short folder first.
+
+The app contains no Valve files. A player with Counter-Strike in Steam can press **Import from my CS install** on the Display tab: the app reads their own CS2/CS:GO and CS 1.6 folders and builds the real knives, skins, arms and maps list in its data folder on that PC, in about a minute. **Back to built-in models** deletes those files again. Without CS, the game uses its built-in models. The app can only read those two game folders and its own data.
+
 ## Leaderboard
 
 Each map has a leaderboard for you and your friends, on the Records tab. Modern, Classic and 128-tick have separate boards, and only saved runs count. Without the setup below the game works the same, with no leaderboard.

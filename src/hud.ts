@@ -10,6 +10,8 @@ type HudOptions = {
   onPlay: () => void;
   onCloseMenu: () => void;
   onQuit: (() => void) | null; // only the desktop app can close itself
+  onRealImport: () => void;
+  onRealRemove: () => void;
   onBoardOpen: (mapId?: string) => void;
   onGroupJoin: (code: string) => void;
   onLoadFile: (file: File) => void;
@@ -143,6 +145,14 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
             <label class="row check"><input name="showViewmodel" type="checkbox" /><span>Show arms and knife</span></label>
             <label class="row check"><input name="speedFx" type="checkbox" /><span>Widen the view at high speed</span></label>
             <label class="row check"><input name="fullscreen" type="checkbox" /><span>Fullscreen while playing (holds the mouse in; hold Esc to leave)</span></label>
+            <div class="realModels" hidden>
+              <p class="recentTitle">Real CS models</p>
+              <p class="note realNote" role="status"></p>
+              <div class="shareRow">
+                <button type="button" class="button realImport"></button>
+                <button type="button" class="button realRemove" hidden>Back to built-in models</button>
+              </div>
+            </div>
           </div>
           <div class="sheet" role="tabpanel" id="sheet-knife" aria-labelledby="tab-knife" hidden>
             <p class="note noKnives">Knives appear after running <code>npm run import-maps</code> with CS2 installed.</p>
@@ -345,6 +355,8 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     el.file.value = '';
   });
   $('.play').addEventListener('click', opts.onPlay);
+  $('.realImport').addEventListener('click', opts.onRealImport);
+  $('.realRemove').addEventListener('click', opts.onRealRemove);
   // Also turns the setting off, or the next Play would go straight back to fullscreen.
   const exitFullscreen = $('.exitFullscreen');
   const showExit = () => (exitFullscreen.hidden = !document.fullscreenElement);
@@ -656,6 +668,14 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
           return tr;
         }),
       );
+    },
+    // The desktop app's Steam import. importLabel null: nothing to import from.
+    setRealModels(r: { note: string; importLabel: string | null; canRemove: boolean }) {
+      $('.realModels').hidden = false;
+      $('.realNote').textContent = r.note;
+      $('.realImport').hidden = !r.importLabel;
+      $('.realImport').textContent = r.importLabel ?? '';
+      $('.realRemove').hidden = !r.canRemove;
     },
     setBoardNote: (text: string) => ($('.boardNote').textContent = text),
     setFinishBoard: (text: string) => ($('.finishBoard').textContent = text),

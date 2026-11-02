@@ -8,6 +8,11 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+serde_json = "1"
+url = "2"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
 
 # The app only opens a window around the game, so size matters more than Rust speed.
 [profile.release]
