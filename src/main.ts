@@ -112,6 +112,7 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
     saveSettings(next);
     renderer.setShowViewmodel(next.showViewmodel);
     input.setJumpBind(next.jumpBind);
+    input.setFullscreen(next.fullscreen);
     input.setKeys(next.keys);
     renderer.setFov(next.fov);
     if (tickChanged) acc = createAccumulator(1 / config.tickrate);
@@ -268,6 +269,7 @@ function openConsole() {
   typing = true;
   input.setTyping(true);
   held.clear();
+  input.cancelLock();
   if (consoleFromGame) document.exitPointerLock(); // the mouse is for the console now, like CS's
   if (!consoleShown) (consoleShown = true), con.execute('help', conPrint); // the first time: everything it knows
   hud.openConsole((line) => con.execute(line, conPrint), con.complete, () => {
@@ -639,13 +641,15 @@ fetch('/maps/index.json')
   .catch(() => {}); // no dev server endpoint: built-in maps and file loading still work
 }
 
-input.onLockRefused(() => hud.flash('Your browser needs a moment. Click Play again.'));
+input.onLockRefused(() => !menuClosed && hud.flash('Your browser needs a moment. Click Play again.'));
 input.setKeys(settings.keys);
+input.setFullscreen(settings.fullscreen);
 
 // Watch your best run from behind. Any key ends it.
 function startReplay() {
   if (!ghost) return hud.setShareNote('Set a record on this map first.');
   if (input.locked()) document.exitPointerLock();
+  input.setTyping(true); // a click during the replay must not grab the mouse
   hud.showOverlay(false);
   hud.showStart(false);
   hud.showResume(false);
@@ -656,20 +660,23 @@ function startReplay() {
 }
 function stopReplay() {
   replayStart = -1;
+  input.setTyping(false);
   renderer.setShowViewmodel(settings.showViewmodel);
   renderer.setGhost(null);
   hud.showOverlay(true);
 }
 // Esc closed the menu, but browsers don't hand the mouse back on Esc: the game waits for a click.
-let menuClosed = false;
+let menuClosed = false, lockLostAt = -1000;
 const showMenu = (open: boolean) => {
   menuClosed = !open;
+  if (open) input.cancelLock();
   hud.showOverlay(open);
   hud.showResume(!open);
 };
 input.onLockChange((locked) => {
   if (locked) (menuClosed = false), hud.showStart(false);
-  hud.showOverlay(!locked && !menuClosed);
+  if (!locked) lockLostAt = performance.now();
+  hud.showOverlay(!locked && !menuClosed && !hud.consoleOpen()); // the console stands alone: closing it goes back to the game
   hud.showResume(!locked && menuClosed);
   acc.reset();
   held.clear();
@@ -679,8 +686,13 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     return stopReplay();
   }
+  // The console's field handles its own keys, so this is only after a click took focus away from it.
+  if (hud.consoleOpen() && (e.key === 'Escape' || e.code === 'Backquote' || e.key === '`')) return hud.closeConsole();
   // In game, Esc is the browser's own: it releases the mouse and the menu opens. Out of game it toggles the menu.
-  if (e.key === 'Escape' && !typing && !input.locked() && !e.repeat && !hud.startOpen()) {
+  if (e.key === 'Escape' && !typing && !e.repeat && !hud.startOpen()) {
+    if (input.locked()) return document.exitPointerLock(); // fullscreen holds Esc for us, so this one is the game's
+    if (performance.now() - lockLostAt < 300) return; // the same press that just freed the mouse: the menu stays open
+    if (hud.backToStart()) return;
     showMenu(menuClosed);
     if (menuClosed) input.requestLock(); // usually refused right after Esc; then the hint asks for a click
     return;

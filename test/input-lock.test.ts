@@ -38,4 +38,50 @@ describe('pointer lock and held keys', () => {
     canvas.dispatchEvent(new Event('click'));
     expect(canvas.requestPointerLock).toHaveBeenCalled();
   });
+  it('a click while typing in the console does not take the mouse', () => {
+    createInput(canvas as unknown as HTMLCanvasElement).setTyping(true);
+    canvas.dispatchEvent(new Event('click'));
+    expect(canvas.requestPointerLock).not.toHaveBeenCalled();
+  });
+});
+
+describe('refused lock requests', () => {
+  beforeEach(() => void vi.useFakeTimers({ toFake: ['setTimeout', 'performance'] }));
+  afterEach(() => void vi.useRealTimers());
+  const refuse = () => doc.dispatchEvent(new Event('pointerlockerror'));
+
+  it('keep asking through the pause after Esc, then report it', () => {
+    const input = createInput(canvas as unknown as HTMLCanvasElement), refused = vi.fn(), changes = vi.fn();
+    input.onLockRefused(refused);
+    input.onLockChange(changes);
+    input.requestLock();
+    refuse();
+    vi.advanceTimersByTime(250);
+    expect(canvas.requestPointerLock).toHaveBeenCalledTimes(2);
+    expect(refused).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1500);
+    refuse();
+    vi.advanceTimersByTime(1000);
+    expect(canvas.requestPointerLock).toHaveBeenCalledTimes(2);
+    expect(refused).toHaveBeenCalledOnce();
+    expect(changes).toHaveBeenCalledWith(false);
+  });
+  it('stop asking once the player opens the menu', () => {
+    const input = createInput(canvas as unknown as HTMLCanvasElement);
+    input.requestLock();
+    refuse();
+    input.cancelLock();
+    vi.advanceTimersByTime(250);
+    expect(canvas.requestPointerLock).toHaveBeenCalledOnce();
+  });
+  it('drop raw input only where the browser lacks it', async () => {
+    const input = createInput(canvas as unknown as HTMLCanvasElement);
+    canvas.requestPointerLock.mockImplementationOnce(() => Promise.reject(Object.assign(new Error(), { name: 'NotSupportedError' })));
+    input.requestLock();
+    await vi.advanceTimersByTimeAsync(0);
+    refuse();
+    vi.advanceTimersByTime(250);
+    expect(canvas.requestPointerLock.mock.calls[0][0]).toEqual({ unadjustedMovement: true });
+    expect(canvas.requestPointerLock.mock.calls[1][0]).toBeUndefined();
+  });
 });

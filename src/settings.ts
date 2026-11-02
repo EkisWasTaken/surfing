@@ -1,9 +1,9 @@
 import { config, setGameMode, GameMode } from './config';
 
 export type KeyBinds = { forward: string; back: string; left: string; right: string; walk: string; duck: string };
-export type Settings = { name: string; game: GameMode; sensitivity: number; fov: number; tickrate: 64 | 128; autobhop: boolean; showSpeed: boolean; map: string; jumpBind: string; showGhost: boolean; showViewmodel: boolean; speedFx: boolean; hudScale: number; keys: KeyBinds; knife: string; finish: string; wear: number; seed: number };
+export type Settings = { name: string; game: GameMode; sensitivity: number; fov: number; tickrate: 64 | 128; autobhop: boolean; showSpeed: boolean; map: string; jumpBind: string; showGhost: boolean; showViewmodel: boolean; speedFx: boolean; fullscreen: boolean; hudScale: number; keys: KeyBinds; knife: string; finish: string; wear: number; seed: number };
 
-export const defaults: Settings = { name: 'Player', game: 'csgo', sensitivity: 2, fov: 90, tickrate: 64, autobhop: true, showSpeed: true, map: 'warmup', jumpBind: 'Space', showGhost: true, showViewmodel: true, speedFx: true, hudScale: 1, keys: { forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD', walk: 'ShiftLeft', duck: 'KeyC' }, knife: 'knife_default_ct', finish: '', wear: 0.01, seed: 0 };
+export const defaults: Settings = { name: 'Player', game: 'csgo', sensitivity: 2, fov: 90, tickrate: 64, autobhop: true, showSpeed: true, map: 'warmup', jumpBind: 'Space', showGhost: true, showViewmodel: true, speedFx: true, fullscreen: true, hudScale: 1, keys: { forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD', walk: 'ShiftLeft', duck: 'KeyC' }, knife: 'knife_default_ct', finish: '', wear: 0.01, seed: 0 };
 
 const KEY = 'surf-settings';
 const num = (v: unknown, min: number, max: number, fallback: number) =>
@@ -31,6 +31,7 @@ export function parseSettings(raw: string | null): Settings {
     showGhost: bool(o.showGhost, defaults.showGhost),
     showViewmodel: bool(o.showViewmodel, defaults.showViewmodel),
     speedFx: bool(o.speedFx, defaults.speedFx),
+    fullscreen: bool(o.fullscreen, defaults.fullscreen),
     hudScale: num(o.hudScale, 0.7, 1.6, defaults.hudScale),
     keys: Object.fromEntries(Object.entries(defaults.keys).map(([k, d]) => {
       const v = (o.keys as Record<string, unknown> | undefined)?.[k];

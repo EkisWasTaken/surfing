@@ -126,6 +126,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
             <label class="row check"><input name="showGhost" type="checkbox" /><span>Race a ghost of your best run</span></label>
             <label class="row check"><input name="showViewmodel" type="checkbox" /><span>Show arms and knife</span></label>
             <label class="row check"><input name="speedFx" type="checkbox" /><span>Widen the view at high speed</span></label>
+            <label class="row check"><input name="fullscreen" type="checkbox" /><span>Fullscreen while playing (holds the mouse in; hold Esc to leave)</span></label>
           </div>
           <div class="sheet" role="tabpanel" id="sheet-knife" aria-labelledby="tab-knife" hidden>
             <p class="note noKnives">Knives appear after running <code>npm run import-maps</code> with CS2 installed.</p>
@@ -251,6 +252,8 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   el.showGhost.checked = cur.showGhost;
   el.showViewmodel.checked = cur.showViewmodel;
   el.speedFx.checked = cur.speedFx;
+  el.fullscreen.checked = cur.fullscreen;
+  if (!('keyboard' in navigator)) el.fullscreen.closest('label')!.style.display = 'none';
   el.hudScale.value = String(cur.hudScale);
   el.hudScaleOut.value = `${Math.round(cur.hudScale * 100)}%`;
   root.style.setProperty('--hud-scale', String(cur.hudScale));
@@ -289,6 +292,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       showGhost: el.showGhost.checked,
       showViewmodel: el.showViewmodel.checked,
       speedFx: el.speedFx.checked,
+      fullscreen: el.fullscreen.checked,
       hudScale: Number(el.hudScale.value),
       knife: el.knife.value || cur.knife,
       // An unchanged finish list keeps the saved finish even if this knife doesn't offer it.
@@ -317,7 +321,9 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     start.hidden = true;
     opts.onPlay();
   });
+  let optionsFromStart = false;
   $('.startSettings').addEventListener('click', () => {
+    optionsFromStart = true;
     start.hidden = true;
     overlay.hidden = false;
   });
@@ -549,7 +555,17 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     setShareNote: (msg: string) => ($('.shareNote').textContent = msg),
     showOverlay: (show: boolean) => (overlay.hidden = !show),
     startOpen: () => !start.hidden,
-    showStart: (show: boolean) => (start.hidden = !show),
+    showStart(show: boolean) {
+      start.hidden = !show;
+      optionsFromStart = false;
+    },
+    // Esc in Options opened from the start screen goes back there.
+    backToStart() {
+      if (!optionsFromStart) return false;
+      overlay.hidden = true;
+      this.showStart(true);
+      return true;
+    },
     // The end of a run. The mouse is locked in play, so its actions are keys.
     showFinish(f: { title: string; time: string; detail: string; speed: number; tone: 'good' | 'bad'; next: string | null } | null) {
       finishPanel.hidden = !f;

@@ -4,6 +4,7 @@ import { defaults, KeyBinds } from './settings';
 
 const SPIKE = 500;
 const SPIKE_RATIO = 8;
+const RETRY_MS = 1500; // browsers refuse the mouse for about a second after Esc; the click that asked stays valid
 
 // Some browsers report a huge delta on the first event after pointer lock, and occasional
 // isolated spikes. Real flicks ramp up over several events, so only drop sudden jumps.
@@ -40,23 +41,39 @@ export function createInput(canvas: HTMLCanvasElement) {
   let typing = false; // chat open: keys are text, not movement
   const listeners: ((locked: boolean) => void)[] = [];
   let onRefused = () => {};
+  let raw = true, retryUntil = 0, fullscreen = false;
   const locked = () => document.pointerLockElement === canvas;
 
+  // Raw input where supported (matches CS:GO raw input), plain lock where it isn't.
+  // Refusals surface via 'pointerlockerror', so the promise only needs its rejection swallowed.
+  const attempt = () => {
+    const asked = canvas.requestPointerLock(raw ? { unadjustedMovement: true } : undefined) as unknown as Promise<void> | undefined;
+    asked?.catch?.((e: Error) => {
+      if (e?.name === 'NotSupportedError') raw = false;
+    });
+  };
   const requestLock = () => {
-    // Raw input where supported (matches CS:GO raw input); fall back to plain lock.
-    // Failures surface via 'pointerlockerror', so the promises only need their rejections swallowed.
-    const lock = (opts?: PointerLockOptions) => canvas.requestPointerLock(opts) as unknown as Promise<void> | undefined;
-    lock({ unadjustedMovement: true })?.catch?.(() => lock()?.catch?.(() => {}));
+    retryUntil = performance.now() + RETRY_MS;
+    attempt();
+    // Lock first: entering fullscreen uses up the click. In fullscreen Esc reaches the game instead of freeing the mouse.
+    if (!fullscreen || document.fullscreenElement) return;
+    document.documentElement
+      .requestFullscreen({ navigationUI: 'hide' })
+      .then(() => (navigator as unknown as { keyboard: { lock(keys: string[]): Promise<void> } }).keyboard.lock(['Escape']))
+      .then(() => !locked() && attempt()) // some browsers drop the lock on the switch
+      .catch(() => {});
   };
   // Only when unlocked: re-requesting while locked fires another lockchange, which used to drop held keys mid-run
   // (every knife attack click stopped you until W was pressed again).
-  canvas.addEventListener('click', () => !locked() && requestLock());
+  canvas.addEventListener('click', () => !locked() && !typing && requestLock());
   document.addEventListener('pointerlockchange', () => {
     filter = mouseFilter();
     if (!locked()) keys.clear(); // keys released while unlocked never reach us
+    else retryUntil = 0;
     listeners.forEach((cb) => cb(locked()));
   });
   document.addEventListener('pointerlockerror', () => {
+    if (performance.now() < retryUntil) return void setTimeout(() => retryUntil && attempt(), 250);
     listeners.forEach((cb) => cb(false));
     onRefused();
   });
@@ -106,6 +123,12 @@ export function createInput(canvas: HTMLCanvasElement) {
     },
     locked,
     requestLock,
+    cancelLock: () => (retryUntil = 0),
+    // Only where Esc can be held for the game; elsewhere fullscreen would just drop on every Esc.
+    setFullscreen(on: boolean) {
+      fullscreen = on && 'keyboard' in navigator;
+      if (!on && document.fullscreenElement) document.exitFullscreen();
+    },
     onLockChange: (cb: (locked: boolean) => void) => listeners.push(cb),
     onLockRefused: (cb: () => void) => (onRefused = cb), // browsers refuse the mouse for a moment after Esc
     setView(y: number, p: number) {
