@@ -268,3 +268,38 @@ describe('face orientation with the side flag', () => {
     }
   });
 });
+
+describe('finding the finish', () => {
+  const base = `{ "classname" "worldspawn" }
+{ "classname" "info_player_terrorist" "origin" "0 0 1" "angles" "0 0 0" }`;
+  const box = (x: number) => [{ mins: [x, 0, 0], maxs: [x + 64, 64, 64], contents: 1 }];
+  const endOf = (ents: string, count = 3) => parseBsp(buildBsp({ entities: base + ents, world: [floor], submodels: [box(1000), box(2000), box(3000)].slice(0, count) }), 'test').endZone;
+
+  it('skips stage and bonus triggers when the map has its own end', () => {
+    const z = endOf(`
+{ "classname" "trigger_multiple" "model" "*1" "targetname" "bonus1_end" }
+{ "classname" "trigger_multiple" "model" "*2" "targetname" "b2_end" }
+{ "classname" "trigger_multiple" "model" "*3" "targetname" "map_end" }`);
+    expect(z![0].mins.x).toBe(3000);
+  });
+  it('treats a teleport into a room named end as the finish', () => {
+    const z = endOf(`
+{ "classname" "trigger_teleport" "model" "*1" "target" "EndRoom" }
+{ "classname" "info_teleport_destination" "targetname" "EndRoom" "origin" "500 600 700" }`);
+    expect(z![0].mins).toEqual({ x: 436, y: 536, z: 684 });
+    expect(z![0].maxs).toEqual({ x: 564, y: 664, z: 828 });
+  });
+  it('ignores an end room nothing teleports to', () => {
+    expect(endOf(`{ "classname" "info_teleport_destination" "targetname" "end" "origin" "500 600 700" }`)).toBeNull();
+  });
+  it('falls back to the end of the last stage', () => {
+    const z = endOf(`
+{ "classname" "trigger_multiple" "model" "*1" "targetname" "stage1_end" }
+{ "classname" "trigger_multiple" "model" "*2" "targetname" "stage3_end" }
+{ "classname" "trigger_multiple" "model" "*3" "targetname" "stage2_end" }`);
+    expect(z![0].mins.x).toBe(2000);
+  });
+  it('finds none on a map with no markers', () => {
+    expect(endOf('', 0)).toBeNull();
+  });
+});

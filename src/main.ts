@@ -22,7 +22,7 @@ import { createInput } from './input';
 import { createRenderer } from './render';
 import { createHud } from './hud';
 import { newRun, tickRun, formatTime, Run } from './timer';
-import { loadRecords, saveRecords, recordFinish, recordKey, FinishResult } from './records';
+import { loadRecords, saveRecords, recordFinish, recordKey, recordTrack, finishKind, FinishResult } from './records';
 import { ghostFromTicks, sampleGhost, loadGhost, saveGhost, Ghost } from './ghost';
 import { createConsole, keyName, Print } from './console';
 import { modeDefault } from './config';
@@ -58,7 +58,8 @@ let maxSpeed = 0;
 let typing = false; // chat or console input open
 let noclip = false; // console noclip: fly through walls (practice)
 let showFps = false;
-const best = () => records[recordKey(settings.game, map.id)]?.best ?? null; // per game: CS:GO and 1.6 times differ
+const runTrack = () => recordTrack(settings.game, settings.tickrate);
+const best = () => records[recordKey(runTrack(), map.id)]?.best ?? null; // per game and tick rate: their times aren't comparable
 let simState = newTickState(); // once-pushes, health and hurt timing carried between ticks
 let pose = newPose(); // knife bob/sway
 let lastFrameView = { yaw: 0, pitch: 0 };
@@ -79,7 +80,7 @@ function useMap(m: MapDef) {
   grid = createGrid(m.brushes);
   m.spawn = unstick(m.spawn, m.brushes);
   const textures = renderer.setMap(m);
-  ghost = loadGhost(settings.game, m.id);
+  ghost = loadGhost(runTrack(), m.id);
   respawn();
   return textures;
 }
@@ -101,9 +102,11 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
     input.setJumpBind(next.jumpBind);
     renderer.setFov(next.fov);
     if (tickChanged) acc = createAccumulator(1 / config.tickrate);
-    if (gameChanged) (renderer.setGame(next.game), (ghost = loadGhost(next.game, map.id)));
-    if (gameChanged && !mapChanged) respawn(); // hulls and rules differ: start the run over under the new ones
-    if (gameChanged && !mapChanged) (announceMap(), refreshRecords());
+    if (gameChanged) renderer.setGame(next.game);
+    if (gameChanged && next.game === 'cs16') loadClassic();
+    if (tickChanged) ghost = loadGhost(runTrack(), map.id);
+    if (tickChanged && !mapChanged) respawn(); // hulls and rules differ: start the run over under the new ones
+    if (tickChanged && !mapChanged) (announceMap(), refreshRecords());
     if (knifeChanged) (OWN_MODELS ? loadOwnKnife : loadKnife)(next.knife);
     else if (finishChanged) applyFinish();
     if (!mapChanged) return;
@@ -383,12 +386,12 @@ function setGoal(print: Print) {
 const surfLine: Print = (text, tone) => surf({ text, tone: tone === 'error' ? 'bad' : undefined });
 
 function refreshRecords() {
-  const prefix = `${settings.game}:`;
+  const prefix = `${runTrack()}:`;
   const rows = Object.entries(records)
     .filter(([k]) => k.startsWith(prefix))
     .map(([k, r]) => ({ mapId: k.slice(prefix.length), best: r.best, finishes: r.finishes, bestAt: r.bestAt }))
     .sort((a, b) => b.bestAt - a.bestAt);
-  hud.setRecords(gameName(), rows, map.id, records[recordKey(settings.game, map.id)]?.recent ?? []);
+  hud.setRecords(`${gameName()}${runTrack() === 'csgo128' ? ' 128-tick' : ''}`, rows, map.id, records[recordKey(runTrack(), map.id)]?.recent ?? []);
 }
 refreshRecords();
 if (!wantedMap.startsWith('bsp:')) announceMap(); // folder maps announce once they've loaded
@@ -531,7 +534,16 @@ if (OWN_MODELS) {
   hud.setKnives(OWN_KNIVES);
   loadOwnKnife(settings.knife);
 } else loadOwnKnife(OWN_KNIVES[0].id); // shown until the imported CS2 knife arrives
-gltf.load(retroModel, (g) => renderer.setOwn('cs16', g.scene, g.animations), undefined, (e) => console.warn('viewmodel:', e));
+// Classic's models, the first time that mode is played.
+let classicLoad: Promise<GLTF> | null = null;
+function loadClassic() {
+  classicLoad ??= gltf.loadAsync(retroModel);
+  classicLoad.then((g) => renderer.setOwn('cs16', g.scene, g.animations)).catch((e) => {
+    classicLoad = null;
+    console.warn('viewmodel:', e);
+  });
+}
+if (settings.game === 'cs16') loadClassic();
 // The public build has none of these files, so it doesn't ask for them.
 if (!OWN_MODELS) {
 fetch('/cs16/v_knife.mdl')
@@ -640,7 +652,7 @@ function tick(cmd: ReturnType<typeof input.cmd>, tickDt: number) {
   const was = run.phase;
   run = tickRun(run, touching(cur, map.startZone), touching(cur, map.endZone), tickDt);
   const speed = Math.hypot(cur.vel.x, cur.vel.y);
-  if (run.phase === 'ready') practice = false; // back in the start zone: a fresh, valid run
+  if (run.phase === 'ready') practice = false; // back in the start zone: a fresh, valid run (noclip sets it again each tick)
   if (run.phase !== 'ready' && was === 'ready') {
     // Left the start zone: what surf timers call start speed (prestrafe).
     recording = [];
@@ -651,19 +663,20 @@ function tick(cmd: ReturnType<typeof input.cmd>, tickDt: number) {
     recording.push(cur.pos.x, cur.pos.y, cur.pos.z, lastTickYaw);
     maxSpeed = Math.max(maxSpeed, speed);
   }
-  if (was === 'running' && run.phase === 'finished') {
-    if (practice || serverChanged()) {
-      surf({ text: `Practice run: ${formatTime(run.time)}. ${practice ? 'Checkpoints or noclip were used' : 'Server settings differ from the defaults (sv_defaults restores them)'}, so it isn't saved.`, tone: 'bad' });
+  const finish = finishKind(was, run.phase, practice, serverChanged());
+  if (finish) {
+    if (finish !== 'record') {
+      surf({ text: `Practice run: ${formatTime(run.time)}. ${finish === 'practice' ? 'Checkpoints or noclip were used' : 'Server settings differ from the defaults (sv_defaults restores them)'}, so it isn't saved.`, tone: 'bad' });
       hud.flash(`Practice: ${formatTime(run.time)}`);
     } else {
-      const r = recordFinish(records, settings.game, map.id, run.time, Date.now());
+      const r = recordFinish(records, runTrack(), map.id, run.time, Date.now());
       records = r.all;
       saveRecords(records);
       announceFinish(r);
       refreshRecords();
       // A new best becomes the ghost you race next time.
       const g = r.kind !== 'slower' ? ghostFromTicks(recording, tickDt) : null;
-      if (g) saveGhost(settings.game, map.id, (ghost = g));
+      if (g) saveGhost(runTrack(), map.id, (ghost = g));
     }
   }
 }

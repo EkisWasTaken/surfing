@@ -273,7 +273,7 @@ function propMeshes(props: BspMap['props'], pak: Map<string, Uint8Array>, materi
 export function createRenderer(canvas: HTMLCanvasElement) {
   let showViewmodel = true;
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // sharper than this costs far more frame rate than it shows
   const scene = new THREE.Scene();
   const sky = skyMesh();
   sky.scale.setScalar(50000);

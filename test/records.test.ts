@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { recordFinish, parseRecords, recordKey, RECENT } from '../src/records';
+import { recordFinish, parseRecords, recordKey, recordTrack, finishKind, RECENT } from '../src/records';
 
 describe('recordFinish', () => {
   it('first finish, then a slower one, then a new best', () => {
@@ -41,5 +41,30 @@ describe('parseRecords', () => {
     expect(Object.keys(r).sort()).toEqual(['csgo:a', 'csgo:surf_old']);
     expect(r['csgo:surf_old']).toMatchObject({ best: 42, finishes: 1 });
     expect(parseRecords('not json', null)).toEqual({});
+  });
+});
+
+describe('finishKind', () => {
+  it('only a running run reaching the finish counts', () => {
+    expect(finishKind('running', 'running', false, false)).toBeNull();
+    expect(finishKind('finished', 'finished', false, false)).toBeNull();
+    expect(finishKind('ready', 'finished', false, false)).toBeNull();
+  });
+  it('saves clean runs only, and says why not', () => {
+    expect(finishKind('running', 'finished', false, false)).toBe('record');
+    expect(finishKind('running', 'finished', true, false)).toBe('practice');
+    expect(finishKind('running', 'finished', false, true)).toBe('settings');
+    expect(finishKind('running', 'finished', true, true)).toBe('practice');
+  });
+});
+
+describe('recordTrack', () => {
+  it('keeps tick rates apart, with old records on 64 tick', () => {
+    expect(recordTrack('csgo', 64)).toBe('csgo');
+    expect(recordTrack('csgo', 128)).toBe('csgo128');
+    expect(recordTrack('cs16', 128)).toBe('cs16');
+    const all = recordFinish({}, 'csgo128', 'm', 50, 1).all;
+    expect(all[recordKey('csgo', 'm')]).toBeUndefined();
+    expect(parseRecords(JSON.stringify(all), null)[recordKey('csgo128', 'm')].best).toBe(50); // survives a reload
   });
 });

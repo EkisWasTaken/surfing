@@ -150,7 +150,7 @@ function goldsrcRig(mdl: Mdl) {
   return { root, sequences: new Map(mdl.sequences.map((q) => [q.label.toLowerCase(), q])), sample };
 }
 
-// The game's own arms and knife (scripts/blender/viewmodels.py), used when nothing was imported for this game.
+// The game's own arms and knife (scripts/blender/fit_viewmodel.py), used when nothing was imported for this game.
 type OwnRig = { root: THREE.Object3D; mixer: THREE.AnimationMixer; actions: Map<string, THREE.AnimationAction> };
 
 // CS 1.6 v_knife sequences for our clip names (it has no inspect), and each game's miss timing.
@@ -225,6 +225,7 @@ export function createViewmodel(renderer: THREE.WebGLRenderer) {
       cs16.visible = g === 'cs16';
       anim = { clip: 'draw', start: -1 };
       nextAttack = 0;
+      for (const r of Object.values(ownRigs)) r.mixer.stopAllAction(); // nothing left running to blend into the draw
       ownAction = null;
       resize(camera.aspect);
     },

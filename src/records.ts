@@ -1,5 +1,6 @@
 // Personal records per map and per game (CS:GO and CS 1.6 times aren't comparable), kept in this browser.
 import type { GameMode } from './config';
+import type { Run } from './timer';
 
 export const RECENT = 10; // finishes kept per map, newest first
 export type Finish = { time: number; at: number }; // at: epoch ms
@@ -8,9 +9,18 @@ export type Records = Record<string, MapRecord>;
 // first: no earlier finish; pb: beat the best; slower: didn't. delta = time - previous best; rank among recent finishes.
 export type FinishResult = { all: Records; record: MapRecord; kind: 'first' | 'pb' | 'slower'; delta: number; rank: number };
 
-export const recordKey = (game: GameMode, mapId: string) => `${game}:${mapId}`;
+// Runs compared with each other: each game, and CS:GO's two tick rates (64 keeps the plain name, so old records stay there).
+export type Track = GameMode | 'csgo128';
+export const recordTrack = (game: GameMode, tickrate: 64 | 128): Track => (game === 'csgo' && tickrate === 128 ? 'csgo128' : game);
+export const recordKey = (track: Track, mapId: string) => `${track}:${mapId}`;
 
-export function recordFinish(all: Records, game: GameMode, mapId: string, time: number, now: number): FinishResult {
+// What crossing the finish means for this tick: nothing unless a running run just finished; then practice beats changed settings.
+export function finishKind(was: Run['phase'], now: Run['phase'], practice: boolean, serverChanged: boolean): 'record' | 'practice' | 'settings' | null {
+  if (was !== 'running' || now !== 'finished') return null;
+  return practice ? 'practice' : serverChanged ? 'settings' : 'record';
+}
+
+export function recordFinish(all: Records, game: Track, mapId: string, time: number, now: number): FinishResult {
   const key = recordKey(game, mapId), prev = all[key];
   const recent = [{ time, at: now }, ...(prev?.recent ?? [])].slice(0, RECENT);
   const pb = !prev || time < prev.best;
@@ -40,7 +50,7 @@ export function parseRecords(raw: string | null, legacy: string | null): Records
   const out: Records = {};
   for (const [k, v] of Object.entries(read(raw))) {
     const r = v as Partial<MapRecord>;
-    if (!/^(csgo|cs16):/.test(k) || !r || !pos(r.best)) continue;
+    if (!/^(csgo|csgo128|cs16):/.test(k) || !r || !pos(r.best)) continue;
     const recent = Array.isArray(r.recent) ? r.recent.filter((f) => f && pos(f.time) && typeof f.at === 'number').slice(0, RECENT) : [];
     out[k] = { best: r.best, bestAt: typeof r.bestAt === 'number' ? r.bestAt : 0, finishes: pos(r.finishes) ? Math.floor(r.finishes) : Math.max(1, recent.length), recent };
   }

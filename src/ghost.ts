@@ -1,7 +1,7 @@
 // Ghost of your best run: positions and yaw sampled at a fixed rate, replayed alongside your next attempts
 // (surf servers' replay bots, for one player). Stored per map and game in this browser.
 import type { Vec3 } from './math';
-import type { GameMode } from './config';
+import type { Track } from './records';
 import { b64, unb64 } from './cs2model';
 
 export const GHOST_RATE = 32; // samples per second: smooth enough with interpolation, small enough to store
@@ -46,9 +46,9 @@ export function decodeGhost(s: string): Ghost | null {
   }
 }
 
-const key = (game: GameMode, mapId: string) => `surf-ghost:${game}:${mapId}`;
+const key = (game: Track, mapId: string) => `surf-ghost:${game}:${mapId}`;
 
-export function loadGhost(game: GameMode, mapId: string): Ghost | null {
+export function loadGhost(game: Track, mapId: string): Ghost | null {
   try {
     const s = localStorage.getItem(key(game, mapId));
     return s ? decodeGhost(s) : null;
@@ -57,7 +57,7 @@ export function loadGhost(game: GameMode, mapId: string): Ghost | null {
   }
 }
 
-export function saveGhost(game: GameMode, mapId: string, g: Ghost) {
+export function saveGhost(game: Track, mapId: string, g: Ghost) {
   try {
     localStorage.setItem(key(game, mapId), encodeGhost(g));
   } catch {} // storage full: the ghost just isn't kept
