@@ -167,11 +167,11 @@ bpy.ops.object.mode_set(mode='OBJECT')
 
 # ---------- Poses ----------
 # Where the right hand rests in view, and the forearm leading to it.
-WRIST = Vector((0.150, 0.300, -0.098)) if RETRO else Vector((0.185, 0.405, -0.082))
+WRIST = Vector((0.145, 0.300, -0.130)) if RETRO else Vector((0.168, 0.400, -0.112))
 # Little finger side. Modern: down, a hammer grip with the blade below the fist. Classic: down and back, so the straight blade points up and forward.
-HAND_X = Vector((0.16, -0.46, -0.87)) if RETRO else Vector((-0.10, 0.22, -0.97))
+HAND_X = Vector((0.16, -0.46, -0.87)) if RETRO else Vector((-0.24, 0.52, -0.82))
 HAND_Y = Vector((-0.66, 0.72, -0.08)) if RETRO else Vector((-0.62, 0.76, 0.18))  # knuckles close to in line with the forearm, turned to show the blade's flat
-FORE_DIR = Vector((-0.52, 0.78, 0.30)).normalized() if RETRO else Vector((-0.40, 0.84, 0.36)).normalized()
+FORE_DIR = Vector((-0.40, 0.84, 0.36)).normalized() if RETRO else Vector((-0.34, 0.88, 0.33)).normalized()
 x, y = HAND_X.normalized(), HAND_Y.normalized()
 y = (y - x * y.dot(x)).normalized()
 HAND_T = Matrix((x, y, x.cross(y))).transposed().to_4x4()
@@ -180,7 +180,7 @@ ELBOW = WRIST - FORE_DIR * L_FORE
 FORE_T = frame(WRIST, FORE_DIR, HAND_T.col[2].to_3d() * 0.5 + Vector((0, 0, 0.5)))
 UPPER_T = frame(ELBOW, (-0.25, 0.75, 0.55), (0, 0, 1))
 # Left arm: mirrored into the lower left, fingers relaxed.
-L_WRIST = Vector((0.225, 0.30, -0.185))
+L_WRIST = Vector((0.33, 0.22, -0.36))  # out of view until something brings it up
 L_FORE_DIR = Vector((-0.34, 0.86, 0.38)).normalized()
 L_HAND_T = frame(L_WRIST, (-0.55, 0.82, 0.12), (0.30, 0.20, 0.93))
 L_FORE_T = frame(L_WRIST, L_FORE_DIR, (0.2, 0.1, 0.97))
