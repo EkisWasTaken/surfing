@@ -7,3 +7,5 @@ public/cs16
 
 align/
 .env*.local
+src-tauri/target
+src-tauri/gen
