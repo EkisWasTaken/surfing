@@ -16,7 +16,7 @@ import type { VtexJson } from './cs2model';
 import { unb64 } from './b64';
 import licensedMaps from '../licensed-maps/manifest.json';
 import type { Track } from './records';
-import { createLeaderboard, playerId, WRONG_CODE } from './leaderboard';
+import { createLeaderboard, loadAccount, saveAccount, WRONG_CODE, NAME_TAKEN, BAD_TOKEN } from './leaderboard';
 import { createGrid } from './grid';
 import { newPlayer, unstick, Player } from './movement';
 import { simTick, touching, newTickState } from './sim';
@@ -29,7 +29,7 @@ import { newRun, tickRun, formatTime, Run } from './timer';
 import { loadRecords, saveRecords, recordFinish, recordKey, recordTrack, finishKind, FinishResult } from './records';
 import { ghostFromTicks, sampleGhost, ghostSeconds, loadGhost, saveGhost, encodeShare, decodeShare, Ghost, Shared } from './ghost';
 import { createConsole, keyName, Print } from './console';
-import { Settings, loadSettings, saveSettings, applySettings } from './settings';
+import { Settings, loadSettings, saveSettings, applySettings, defaults } from './settings';
 
 // three.js needs WebGL 2. Without it the game can't start, so say so rather than leave a blank page.
 if (!document.createElement('canvas').getContext('webgl2')) {
@@ -114,6 +114,8 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
   onQuit: tauri ? () => void tauri.core.invoke('quit') : null,
   onBoardOpen: (mapId) => void showBoard(mapId),
   onGroupJoin: (code) => void joinGroup(code),
+  onCopyRecovery: () => copyRecovery(),
+  onUseRecovery: (code) => void useRecovery(code),
   onChange(next: Settings) {
     const mapChanged = next.map !== settings.map, tickChanged = next.tickrate !== settings.tickrate || next.game !== settings.game;
     const gameChanged = next.game !== settings.game;
@@ -273,10 +275,38 @@ function runCommand(name: string, args: string[]) {
 }
 
 // ---------- Friends' leaderboard ----------
-const board = createLeaderboard(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
-const me = playerId();
+const board = createLeaderboard(import.meta.env.VITE_LEADERBOARD_URL);
+let account = loadAccount();
+const forgetAccount = () => (saveAccount((account = null)), hud.setBoardAccount(settings.groupCode ? '' : null));
 // Only maps every friend has: not local or dropped-in ones.
 const onBoards = (id: string) => builtins.some((m) => m.id === id) || (id.startsWith('bsp:') && licensedUrl(id.slice(4)) !== undefined);
+const NEEDS_NAME = 'needs a name';
+const accountTrouble = (e: unknown) =>
+  e instanceof Error && e.message === NAME_TAKEN ? `The name "${player()}" is taken. Change your name on the Map tab, then press Join.`
+  : e instanceof Error && e.message === NEEDS_NAME ? 'Pick your name on the Map tab, then press Join.'
+  : null;
+// The first time on the boards: claims this player's name.
+async function ensureAccount(code: string) {
+  if (account) return account;
+  if (player() === defaults.name) throw new Error(NEEDS_NAME);
+  account = await board!.register(code, player());
+  saveAccount(account);
+  hud.setBoardAccount(account.name);
+  return account;
+}
+// Carries a changed name over to the boards. Says so if someone else has that name.
+async function syncName(code: string) {
+  if (!account || account.name === player() || player() === defaults.name) return null;
+  const { token, name } = account;
+  try {
+    account = { token, name: (await board!.rename(code, token, player())).name };
+    saveAccount(account);
+    return null;
+  } catch (e) {
+    if (e instanceof Error && e.message === BAD_TOKEN) return forgetAccount(), null;
+    return e instanceof Error && e.message === NAME_TAKEN ? `The name "${player()}" is taken, so you're still "${name}" on the boards.` : null;
+  }
+}
 let boardAsked = 0;
 async function showBoard(mapId = boardMap) {
   if (!board) return;
@@ -285,56 +315,98 @@ async function showBoard(mapId = boardMap) {
   const shown = boardMap, track = runTrack(), asked = ++boardAsked, def = builtins.find((m) => m.id === shown);
   const put = (rows: { place: number; name: string; time: number; mine: boolean; medal: string | null }[], note: string) =>
     hud.setBoard({ title: `Leaderboard: ${gameName()}${track === 'csgo128' ? ' 128-tick' : ''}`, maps: list, map: shown, rows, note });
-  if (!settings.groupCode) return put([], "Enter your group's code to see each other's times.");
+  if (!settings.groupCode) return hud.setBoardAccount(null), put([], "Enter your group's code to see each other's times.");
+  hud.setBoardAccount(account?.name ?? '');
   put([], 'Loading…');
   try {
-    const rows = await board.top(settings.groupCode, me, track, shown);
+    const nameTrouble = await syncName(settings.groupCode);
+    hud.setBoardAccount(account?.name ?? '');
+    const rows = await board.top(settings.groupCode, account?.token ?? null, track, shown);
     const open = maps.find((m) => m.id === shown);
-    if (asked === boardAsked) put(rows.map((r) => ({ ...r, medal: def ? medalFor(def, r.time) : null })), rows.length ? '' : open && !sharedFinish(open) ? "This map has no finish everyone shares, so its times stay on each player's PC." : 'No times on this map yet.');
+    if (asked === boardAsked) put(rows.map((r) => ({ ...r, medal: def ? medalFor(def, r.time) : null })), nameTrouble ?? (rows.length ? '' : open && !sharedFinish(open) ? "This map has no finish everyone shares, so its times stay on each player's PC." : 'No times on this map yet.'));
   } catch (e) {
     if (asked !== boardAsked) return;
     put([], e instanceof Error && e.message === WRONG_CODE ? "That group code doesn't work any more. Ask for the new one." : "The leaderboard can't be reached right now. Your times still save here.");
   }
 }
-// Sends every best on this browser, so runs from before joining, or while offline, reach the boards too.
-async function syncBoards() {
-  if (!board || !settings.groupCode) return;
+// Sends every best on this PC, so runs from before joining, or while offline, reach the boards too.
+// Says what went wrong with the player's name, if anything.
+async function syncBoards(): Promise<string | null> {
+  if (!board || !settings.groupCode) return null;
+  const code = settings.groupCode;
+  let trouble: string | null = null;
   try {
+    const { token } = await ensureAccount(code);
+    trouble = await syncName(code);
     for (const [key, r] of Object.entries(records)) {
       const at = key.indexOf(':'), track = key.slice(0, at) as Track, id = key.slice(at + 1);
-      if (onBoards(id) && !loadGoal(id)) await board.submit(settings.groupCode, me, player(), track, id, r.best); // a saved goal: these times may be to a personal finish
+      if (onBoards(id) && !loadGoal(id)) await board.submit(code, token, track, id, r.best); // a saved goal: these times may be to a personal finish
     }
-  } catch {} // tried again next time the game opens
+  } catch (e) {
+    if (e instanceof Error && e.message === BAD_TOKEN) forgetAccount();
+    trouble = accountTrouble(e); // anything else is tried again next time the game opens
+  }
+  return trouble;
 }
 async function joinGroup(typed: string) {
   if (!board) return;
   const code = typed.trim();
   if (code) {
     try {
-      await board.top(code, me, runTrack(), onBoards(map.id) ? map.id : builtins[0].id);
+      await board.top(code, null, runTrack(), onBoards(map.id) ? map.id : builtins[0].id);
     } catch (e) {
       const wrong = e instanceof Error && e.message === WRONG_CODE;
       return hud.setBoardNote(wrong ? "That isn't the group's code." : "The leaderboard can't be reached right now. Try again in a moment.");
     }
   }
   hud.apply({ groupCode: code });
+  const trouble = await syncBoards();
+  await showBoard();
+  if (trouble) hud.setBoardNote(trouble);
+}
+// Moving to another PC: the code from the old one brings the same player and name back.
+async function useRecovery(typed: string) {
+  if (!board) return;
+  const token = typed.trim();
+  if (!settings.groupCode) return hud.setBoardNote("Enter your group's code first.");
+  try {
+    const { name } = await board.me(settings.groupCode, token);
+    account = { name, token };
+    saveAccount(account);
+    hud.apply({ name });
+    hud.clearRecoveryInput();
+  } catch (e) {
+    const bad = e instanceof Error && e.message === BAD_TOKEN;
+    return hud.setBoardNote(bad ? "That recovery code isn't right." : "The leaderboard can't be reached right now. Try again in a moment.");
+  }
   await syncBoards();
-  showBoard();
+  await showBoard();
+  hud.setBoardNote(`Welcome back, ${account.name}.`);
+}
+function copyRecovery() {
+  if (!account) return;
+  const token = account.token;
+  navigator.clipboard.writeText(token).then(
+    () => hud.setBoardNote('Recovery code copied. Keep it private: it brings your name and times to another PC, and it can\'t be sent again if lost.'),
+    () => hud.setBoardNote(`Your recovery code, keep it private: ${token}`),
+  );
 }
 let finishNo = 0;
-// After a saved run: your best goes up (the database keeps the faster), and the finish screen shows where you stand.
+// After a saved run: your best goes up (the service keeps the faster), and the finish screen shows where you stand.
 async function postBest(best: number, time: number) {
   if (!board || !settings.groupCode || !onBoards(map.id)) return;
-  const asked = ++finishNo, track = runTrack(), id = map.id;
+  const asked = ++finishNo, track = runTrack(), id = map.id, code = settings.groupCode;
   const say = (text: string) => void (asked === finishNo && finishShown && hud.setFinishBoard(text));
   if (!sharedFinish(map)) return say('Saved on this PC only: this map has no finish everyone shares.');
   if (loadGoal(id)) best = time; // older times here may be to a personal finish
   try {
-    await board.submit(settings.groupCode, me, player(), track, id, best);
-    const mine = (await board.top(settings.groupCode, me, track, id)).find((r) => r.mine);
+    const { token } = await ensureAccount(code);
+    await board.submit(code, token, track, id, best);
+    const mine = (await board.top(code, token, track, id)).find((r) => r.mine);
     if (mine) say(`Leaderboard: #${mine.place} of ${mine.players}`);
-  } catch {
-    say("Leaderboard not reached: it'll be sent next time.");
+  } catch (e) {
+    if (e instanceof Error && e.message === BAD_TOKEN) forgetAccount();
+    say(accountTrouble(e) ? 'Not on the leaderboard yet: check your name on the Map tab, then press Join on the Records tab.' : "Leaderboard not reached: it'll be sent next time.");
   }
 }
 

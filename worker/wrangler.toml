@@ -1,0 +1,8 @@
+name = "surf-leaderboard"
+main = "src/index.ts"
+compatibility_date = "2025-06-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "surf-leaderboard"
+database_id = "replace-with-the-id-from-wrangler-d1-create"

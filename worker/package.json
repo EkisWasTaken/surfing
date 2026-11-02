@@ -1,0 +1,14 @@
+{
+  "name": "surf-leaderboard",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup:local": "wrangler d1 execute surf-leaderboard --local --file schema.sql",
+    "setup:remote": "wrangler d1 execute surf-leaderboard --remote --file schema.sql",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

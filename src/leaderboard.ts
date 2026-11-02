@@ -1,45 +1,40 @@
-// The friends' leaderboard, straight on Supabase's REST API. supabase/leaderboard.sql holds the rules: group code, best time per player.
+// The friends' leaderboard: talks to the Cloudflare Worker in worker/, which holds the rules.
 import type { Track } from './records';
 
 export type BoardRow = { place: number; name: string; time: number; mine: boolean; players: number };
-export const WRONG_CODE = 'wrong group code';
+export type Account = { name: string; token: string };
+export const WRONG_CODE = 'wrong group code', NAME_TAKEN = 'name taken', BAD_TOKEN = 'bad token';
 
-// null when this build has no Supabase project: the game then simply has no leaderboard.
-export function createLeaderboard(url?: string, key?: string) {
-  if (!url || !key) return null;
-  const rpc = async (fn: string, args: Record<string, unknown>) => {
-    const res = await fetch(`${url.replace(/\/$/, '')}/rest/v1/rpc/${fn}`, {
-      method: 'POST',
-      headers: { apikey: key, 'Content-Type': 'application/json' },
-      body: JSON.stringify(args),
-    });
-    if (!res.ok) throw new Error((await res.json().catch(() => null))?.message ?? `Leaderboard error ${res.status}`);
-    return res.status === 204 ? null : res.json();
+// null when this build has no leaderboard service: the game then simply has no leaderboard.
+export function createLeaderboard(url?: string) {
+  if (!url) return null;
+  const call = async (action: string, body: Record<string, unknown>) => {
+    const res = await fetch(`${url.replace(/\/$/, '')}/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(8000) });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error ?? `Leaderboard error ${res.status}`);
+    return data;
   };
   return {
-    submit: (code: string, player: string, name: string, track: Track, map: string, time: number) =>
-      rpc('leaderboard_submit', { p_code: code, p_player: player, p_name: name, p_track: track, p_map: map, p_time: time }),
-    top: async (code: string, player: string, track: Track, map: string): Promise<BoardRow[]> =>
-      ((await rpc('leaderboard_top', { p_code: code, p_player: player, p_track: track, p_map: map })) as Record<string, unknown>[]).map((r) => ({
-        place: Number(r.place),
-        name: String(r.name),
-        time: Number(r.run_time),
-        mine: Boolean(r.mine),
-        players: Number(r.players),
-      })),
+    register: (code: string, name: string): Promise<Account> => call('register', { code, name }),
+    me: (code: string, token: string): Promise<{ name: string }> => call('me', { code, token }),
+    rename: (code: string, token: string, name: string): Promise<{ name: string }> => call('rename', { code, token, name }),
+    submit: (code: string, token: string, track: Track, map: string, time: number) => call('submit', { code, token, track, map, time }),
+    top: async (code: string, token: string | null, track: Track, map: string): Promise<BoardRow[]> => (await call('top', { code, token, track, map })).rows,
   };
 }
 
-// Who this browser is on the boards: names can change or clash, this stays. Never shown to anyone.
-export function playerId() {
-  const KEY = 'surf-player';
+const KEY = 'surf-account';
+export function loadAccount(): Account | null {
   try {
-    const saved = localStorage.getItem(KEY);
-    if (saved && /^[0-9a-f-]{36}$/.test(saved)) return saved;
-    const id = crypto.randomUUID();
-    localStorage.setItem(KEY, id);
-    return id;
+    const a = JSON.parse(localStorage.getItem(KEY) ?? 'null');
+    return a && typeof a.name === 'string' && typeof a.token === 'string' ? { name: a.name, token: a.token } : null;
   } catch {
-    return crypto.randomUUID();
+    return null;
   }
+}
+export function saveAccount(a: Account | null) {
+  try {
+    if (a) localStorage.setItem(KEY, JSON.stringify(a));
+    else localStorage.removeItem(KEY);
+  } catch {}
 }

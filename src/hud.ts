@@ -14,6 +14,8 @@ type HudOptions = {
   onRealRemove: () => void;
   onBoardOpen: (mapId?: string) => void;
   onGroupJoin: (code: string) => void;
+  onCopyRecovery: () => void;
+  onUseRecovery: (code: string) => void;
   onLoadFile: (file: File) => void;
   onShareCopy: () => void;
   onShareLoad: (code: string) => void;
@@ -179,6 +181,14 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
               <div class="shareRow">
                 <input class="groupCode" type="text" placeholder="Group code" autocomplete="off" spellcheck="false" aria-label="Group code" />
                 <button type="button" class="button groupJoin">Join</button>
+              </div>
+              <div class="boardAccount" hidden>
+                <p class="note boardWho"></p>
+                <div class="shareRow">
+                  <button type="button" class="button copyRecovery">Copy my recovery code</button>
+                  <input class="recoveryInput" type="text" placeholder="Recovery code from another PC" autocomplete="off" spellcheck="false" aria-label="Recovery code from another PC" />
+                  <button type="button" class="button useRecovery">Use code</button>
+                </div>
               </div>
             </div>
             <p class="recordsTitle"></p>
@@ -394,6 +404,9 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   const finishPanel = $('.finishPanel');
   const boardMap = $<HTMLSelectElement>('.boardMap'), groupCode = $<HTMLInputElement>('.groupCode');
   groupCode.value = cur.groupCode;
+  const recoveryInput = $<HTMLInputElement>('.recoveryInput');
+  $('.copyRecovery').addEventListener('click', opts.onCopyRecovery);
+  $('.useRecovery').addEventListener('click', () => opts.onUseRecovery(recoveryInput.value));
   boardMap.addEventListener('change', () => opts.onBoardOpen(boardMap.value));
   $('.groupJoin').addEventListener('click', () => opts.onGroupJoin(groupCode.value));
   groupCode.addEventListener('keydown', (e) => {
@@ -677,6 +690,13 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       $('.realImport').textContent = r.importLabel ?? '';
       $('.realRemove').hidden = !r.canRemove;
     },
+    // Who this player is on the boards. null: no group yet; empty: in a group, no name claimed yet.
+    setBoardAccount(name: string | null) {
+      $('.boardAccount').hidden = name === null;
+      $('.copyRecovery').hidden = !name;
+      $('.boardWho').textContent = name ? `You're "${name}" on the boards.` : 'Played here before? Your recovery code brings your name and times back.';
+    },
+    clearRecoveryInput: () => (recoveryInput.value = ''),
     setBoardNote: (text: string) => ($('.boardNote').textContent = text),
     setFinishBoard: (text: string) => ($('.finishBoard').textContent = text),
     setShareNote: (msg: string) => ($('.shareNote').textContent = msg),

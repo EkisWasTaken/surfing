@@ -48,20 +48,36 @@ The app contains no Valve files. A player with Counter-Strike in Steam can press
 
 Each map has a leaderboard for you and your friends, on the Records tab. Modern, Classic and 128-tick have separate boards, and only saved runs count. Without the setup below the game works the same, with no leaderboard.
 
-1. In the Supabase SQL editor, run [supabase/leaderboard.sql](supabase/leaderboard.sql).
-2. Set your group's code, and share it with your friends. To change it later, run this again.
+It runs on a small [Cloudflare Worker](worker/src/index.ts) with a D1 database. To set it up, from the `worker` folder:
 
-   ```sql
-   insert into public.leaderboard_group (code) values ('pick-a-long-code')
-   on conflict (only_row) do update set code = excluded.code;
+1. Install the tools and sign in to your free Cloudflare account:
+
+   ```bash
+   npm install
+   npx wrangler login
    ```
 
-3. Give the game your project's URL and its anon (or publishable) key, from Project Settings > API. Never the service_role key.
-   - For local builds, copy `.env.example` to `.env.local` and fill it in.
-   - For the hosted game, add them as repository variables named `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
-4. In the game, enter the code on the Records tab.
+2. Create the database, and put the `database_id` it prints into [worker/wrangler.toml](worker/wrangler.toml):
 
-The game reports its own times, so the code keeps strangers out but can't stop someone in the group from faking one. To remove a time, delete its row in the Supabase table editor. Free Supabase projects pause when unused; the board shows as unavailable until you restore the project in Supabase.
+   ```bash
+   npx wrangler d1 create surf-leaderboard
+   ```
+
+3. Create its tables, set your group's code, and publish. Pick a long code, because guesses aren't limited:
+
+   ```bash
+   npm run setup:remote
+   npx wrangler secret put GROUP_CODE
+   npm run deploy
+   ```
+
+4. Give the game the address it prints:
+   - For local builds, copy `.env.example` to `.env.local` and fill it in.
+   - For the hosted game, add it as a repository variable named `VITE_LEADERBOARD_URL`.
+
+Players enter the group code on the Records tab, and their name on the Map tab is claimed for them. Names are unique. Each player gets a private recovery code, which brings their name and times to another PC. Anyone with it can post as them.
+
+The game reports its own times, so the code keeps strangers out but can't stop someone in the group from faking one. To remove a time or a player, delete the row in the D1 console in Cloudflare's dashboard. Changing the group code locks everyone out until they enter the new one.
 
 ## Adding maps
 
