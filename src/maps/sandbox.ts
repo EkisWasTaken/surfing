@@ -1,6 +1,6 @@
 import { vec } from '../math';
 import { makeBox } from '../brush';
-import { MapDef, builtin, straightChain, lowestZ } from './build';
+import { MapDef, THEMES, builtin, straightChain, lowestZ } from './build';
 
 const LENGTH = 1800, GAP = 400;
 const ramps = straightChain(400, 2400, LENGTH, GAP, 400, [
@@ -13,4 +13,4 @@ const ramps = straightChain(400, 2400, LENGTH, GAP, 400, [
 const endX = 400 + ramps.length * (LENGTH + GAP);
 const low = lowestZ(ramps);
 
-export const sandbox: MapDef = builtin('sandbox', 'Sandbox (easy)', 2576, ramps, makeBox(vec(endX - GAP, -1024, low - 316), vec(endX + 1024, 1024, low - 300)));
+export const sandbox: MapDef = builtin('sandbox', 'Sandbox (easy)', THEMES.desert, 2576, ramps, makeBox(vec(endX - GAP, -1024, low - 316), vec(endX + 1024, 1024, low - 300)));

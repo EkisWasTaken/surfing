@@ -1,19 +1,8 @@
-import { vec } from '../math';
-import { makeBox } from '../brush';
-import { MapDef, builtin, straightChain, lowestZ } from './build';
+import { MapDef, stagedMap, THEMES } from './build';
 
-// Steep, narrow ramps with long gaps and big drops: lose strafe sync and you fall.
+// Steep, narrow ramps with long gaps and big drops, in two stages: lose strafe sync and you fall.
 const LENGTH = 1600, GAP = 640;
-const ramps = straightChain(400, 4000, LENGTH, GAP, 520, [
-  { angle: 62, width: 220 },
-  { angle: 65, width: 200 },
-  { angle: 63, width: 240 },
-  { angle: 67, width: 190 },
-  { angle: 64, width: 210 },
-  { angle: 68, width: 180 },
-  { angle: 66, width: 200 },
+export const spire: MapDef = stagedMap('spire', 'Spire (hard)', THEMES.ember, [
+  { topZ: 4176, length: LENGTH, gap: GAP, drop: 520, sections: [{ angle: 62, width: 220 }, { angle: 65, width: 200 }, { angle: 63, width: 240 }, { angle: 67, width: 190 }] },
+  { topZ: 4176, length: LENGTH, gap: GAP, drop: 520, sections: [{ angle: 64, width: 210 }, { angle: 68, width: 180 }, { angle: 66, width: 200 }] },
 ]);
-const endX = 400 + ramps.length * (LENGTH + GAP);
-const low = lowestZ(ramps);
-
-export const spire: MapDef = builtin('spire', 'Spire (hard)', 4176, ramps, makeBox(vec(endX - GAP, -512, low - 316), vec(endX + 512, 512, low - 300)));

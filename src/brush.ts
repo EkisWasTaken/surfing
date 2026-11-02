@@ -43,5 +43,16 @@ export function makeRamp(origin: Vec3, length: number, width: number, height: nu
   return { kind: 'ramp', mins: origin, maxs, corners, planes: [...makeBox(origin, maxs).planes, plane(n, top)] };
 }
 
+// The same brush moved by o.
+export function translated(b: Brush, o: Vec3): Brush {
+  return {
+    ...b,
+    mins: add(b.mins, o),
+    maxs: add(b.maxs, o),
+    corners: b.corners?.map((c) => add(c, o)),
+    planes: b.planes.map((p) => ({ normal: p.normal, dist: p.dist + dot(p.normal, o) })),
+  };
+}
+
 // The slope is always a ramp's last plane.
 export const slopeOf = (b: Brush): Plane => b.planes[b.planes.length - 1];

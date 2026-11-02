@@ -1,6 +1,6 @@
 import { vec } from '../math';
 import { makeBox, makeRamp } from '../brush';
-import { MapDef, builtin, lowestZ } from './build';
+import { MapDef, THEMES, builtin, lowestZ } from './build';
 
 const h = (width: number, angle: number) => width * Math.tan((angle * Math.PI) / 180);
 // A ramp whose slope tops out at `top`.
@@ -19,4 +19,4 @@ const ramps = [
 ];
 const low = lowestZ(ramps);
 
-export const hairpin: MapDef = builtin('hairpin', 'Hairpin (hard)', 3776, ramps, makeBox(vec(11700, 4800, low - 316), vec(12700, 6200, low - 300)));
+export const hairpin: MapDef = builtin('hairpin', 'Hairpin (hard)', THEMES.sunset, 3776, ramps, makeBox(vec(11700, 4800, low - 316), vec(12700, 6200, low - 300)));

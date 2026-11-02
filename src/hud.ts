@@ -4,7 +4,7 @@ import { formatTime } from './timer';
 import { bindLabel, wheelCode } from './input';
 
 type HudOptions = {
-  maps: { id: string; name: string }[];
+  maps: { id: string; name: string; theme?: { zenith: string; horizon: string } }[];
   settings: Settings;
   onChange: (s: Settings) => void;
   onPlay: () => void;
@@ -63,7 +63,26 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       <div class="hudItem timer" aria-label="Run time">${ICON.clock}<span class="time">0:00.000</span><small class="practiceTag" hidden>practice</small></div>
       <div class="hudItem best" aria-label="Personal best" hidden>${ICON.flag}<span class="bestVal"></span></div>
     </div>
-    <div class="overlay">
+    <section class="finishPanel" hidden aria-live="polite">
+      <h2 class="finishTitle"></h2>
+      <p class="finishTime"></p>
+      <p class="finishDetail"></p>
+      <p class="finishKeys"></p>
+    </section>
+    <div class="start">
+      <section class="window startBox" role="dialog" aria-labelledby="startTitle">
+        <header class="titlebar"><h1 id="startTitle">Surf Sandbox</h1><span class="gameName"></span></header>
+        <div class="mapCards">${opts.maps.filter((m) => m.theme).map((m) => {
+            const [name, level] = m.name.split(/ \((.+)\)/);
+            return `<button type="button" class="button mapCard" data-map="${esc(m.id)}"><i style="background:linear-gradient(90deg,${m.theme!.zenith},${m.theme!.horizon})"></i><strong>${esc(name)}</strong><small>${esc(level ?? '')}</small><span class="cardBest"></span></button>`;
+          }).join('')}</div>
+        <footer class="buttons">
+          <button type="button" class="button startSettings">Options</button>
+          <button type="button" class="button startPlay">Play</button>
+        </footer>
+      </section>
+    </div>
+    <div class="overlay" hidden>
       <section class="window" role="dialog" aria-labelledby="windowTitle">
         <header class="titlebar"><h1 id="windowTitle">Surf Sandbox</h1><span class="gameName"></span></header>
         <div class="tabs" role="tablist" aria-label="Menu sections">
@@ -163,7 +182,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   // The whole UI wears the chosen game's look: CS 1.6 VGUI or CS:GO.
   const showGame = () => {
     root.dataset.game = cur.game;
-    $('.gameName').textContent = gameLabel(cur.game);
+    root.querySelectorAll('.gameName').forEach((e) => (e.textContent = gameLabel(cur.game)));
     el.tickrate.disabled = cur.game === 'cs16';
     $('.tickHint').textContent = cur.game === 'cs16' ? `${gameLabel('cs16')} moves once per frame, at 100 fps.` : '';
     $('.tickHint').hidden = cur.game !== 'cs16';
@@ -249,6 +268,26 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     el.file.value = '';
   });
   $('.play').addEventListener('click', opts.onPlay);
+  // Start screen: the map list drives the same setting as the menu's map picker.
+  const start = $('.start'), cards = [...root.querySelectorAll<HTMLButtonElement>('.mapCard')];
+  const markCard = () => cards.forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.map === el.map.value)));
+  cards.forEach((c) =>
+    c.addEventListener('click', () => {
+      el.map.value = c.dataset.map!;
+      el.map.dispatchEvent(new Event('input', { bubbles: true }));
+      markCard();
+    }),
+  );
+  markCard();
+  $('.startPlay').addEventListener('click', () => {
+    start.hidden = true;
+    opts.onPlay();
+  });
+  $('.startSettings').addEventListener('click', () => {
+    start.hidden = true;
+    overlay.hidden = false;
+  });
+  const finishPanel = $('.finishPanel');
 
   // Rebind: the next key press or wheel notch becomes the jump bind; Esc cancels.
   bindBtn.addEventListener('click', () => {
@@ -425,6 +464,10 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     // Records for the current game; the current map's last finishes underneath.
     setRecords(gameName: string, rows: { mapId: string; best: number; finishes: number; bestAt: number }[], currentId: string, recent: { time: number; at: number }[]) {
       $('.recordsTitle').textContent = `Your ${gameName} records`;
+      for (const c of cards) {
+        const row = rows.find((r) => r.mapId === c.dataset.map);
+        c.querySelector('.cardBest')!.textContent = row ? formatTime(row.best) : '';
+      }
       $('.noRecords').hidden = rows.length > 0;
       const table = $('.records');
       table.hidden = rows.length === 0;
@@ -448,6 +491,19 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     },
     setSpeed: (u: number) => (speedVal.textContent = String(Math.round(u))),
     showOverlay: (show: boolean) => (overlay.hidden = !show),
+    startOpen: () => !start.hidden,
+    showStart: (show: boolean) => (start.hidden = !show),
+    // The end of a run. The mouse is locked in play, so its actions are keys.
+    showFinish(f: { title: string; time: string; detail: string; speed: number; tone: 'good' | 'bad'; next: string | null } | null) {
+      finishPanel.hidden = !f;
+      if (!f) return;
+      $('.finishTitle').textContent = f.title;
+      $('.finishTime').textContent = f.time;
+      const detail = $('.finishDetail');
+      detail.textContent = [f.detail, `max ${f.speed} u/s`].filter(Boolean).join('   ');
+      detail.className = `finishDetail ${f.tone}`;
+      $('.finishKeys').textContent = `R  retry${f.next ? `      N  next: ${f.next}` : ''}`;
+    },
     showResume: (show: boolean) => ($('.resumeHint').hidden = !show),
     setTimer(t: string, bestText: string, practice = false) {
       $('.practiceTag').hidden = !practice;

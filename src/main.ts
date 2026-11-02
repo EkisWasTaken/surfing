@@ -58,6 +58,8 @@ let maxSpeed = 0;
 let typing = false; // chat or console input open
 let noclip = false; // console noclip: fly through walls (practice)
 let showFps = false;
+let stageNow = 0; // the stage a fall returns you to
+let finishShown = false;
 const runTrack = () => recordTrack(settings.game, settings.tickrate);
 const best = () => records[recordKey(runTrack(), map.id)]?.best ?? null; // per game and tick rate: their times aren't comparable
 let simState = newTickState(); // once-pushes, health and hurt timing carried between ticks
@@ -66,6 +68,8 @@ let lastFrameView = { yaw: 0, pitch: 0 };
 let lastTickYaw = 0; // yaw the previous tick used, for spreading mouse turn across ticks
 
 function respawn() {
+  stageNow = 0;
+  if (finishShown) (hud.showFinish(null), (finishShown = false));
   prev = cur = newPlayer(map.spawn);
   simState = newTickState();
   practice = false;
@@ -131,18 +135,20 @@ function announceMap() {
   const pb = best();
   hud.chat([{ text: '[Surf] ', tone: 'tag' }, { text: `Now on ${mapShort(map)} with ${gameName()} movement. ` }, pb === null ? { text: 'No record here yet: leave the start zone to begin.' } : { text: `Your best: ${formatTime(pb)}`, tone: 'good' }]);
 }
+const nextMap = () => maps[maps.findIndex((m) => m.id === map.id) + 1] ?? null;
+function showFinish(title: string, detail: string, tone: 'good' | 'bad') {
+  finishShown = true;
+  hud.showFinish({ title, time: formatTime(run.time), detail, speed: Math.round(maxSpeed), tone, next: nextMap()?.name ?? null });
+}
 function announceFinish(r: FinishResult) {
   const t = `${formatTime(run.time)} (max ${Math.round(maxSpeed)} u/s)`, head = [{ text: '[Surf] ', tone: 'tag' as const }, { text: player(), tone: 'name' as const }];
   if (r.kind === 'first') {
     hud.chat([...head, { text: ` finished ${mapShort(map)} in ${t}. ` }, { text: 'First record on this map!', tone: 'good' }]);
-    hud.flash(`First record: ${t}`);
   } else if (r.kind === 'pb') {
     hud.chat([...head, { text: ` broke their record on ${mapShort(map)}: ${t} ` }, { text: `(${signed(r.delta)})`, tone: 'good' }]);
-    hud.flash(`New personal best: ${t}`);
   } else {
     const nth = r.record.recent.length >= 3 ? `, your ${ordinal(r.rank)} best of the last ${r.record.recent.length}` : '';
     hud.chat([...head, { text: ` finished ${mapShort(map)} in ${t} ` }, { text: `(${signed(r.delta)}${nth})`, tone: 'bad' }]);
-    hud.flash(`Finished ${t}`);
   }
 }
 const surf = (...parts: { text: string; tone?: 'good' | 'bad' }[]) => hud.chat([{ text: '[Surf] ', tone: 'tag' }, ...parts]);
@@ -269,6 +275,7 @@ con.command('status', 'Map, game and your run', (_, p) => {
   p(`run     : ${run.phase === 'ready' ? 'in the start zone' : formatTime(run.time) + (run.phase === 'finished' ? ' (finished)' : '')}${practice ? ', practice' : ''}`);
   const pb = best();
   p(`best    : ${pb === null ? 'none yet' : formatTime(pb)}`);
+  if (map.stages) p(`stage   : ${stageNow + 1} of ${map.stages.length}`);
 });
 con.command('noclip', 'Fly through walls', (_, p) => {
   noclip = !noclip;
@@ -583,7 +590,7 @@ const showMenu = (open: boolean) => {
   hud.showResume(!open);
 };
 input.onLockChange((locked) => {
-  if (locked) menuClosed = false;
+  if (locked) (menuClosed = false), hud.showStart(false);
   hud.showOverlay(!locked && !menuClosed);
   hud.showResume(!locked && menuClosed);
   acc.reset();
@@ -591,7 +598,7 @@ input.onLockChange((locked) => {
 });
 window.addEventListener('keydown', (e) => {
   // In game, Esc is the browser's own: it releases the mouse and the menu opens. Out of game it toggles the menu.
-  if (e.key === 'Escape' && !typing && !input.locked() && !e.repeat) {
+  if (e.key === 'Escape' && !typing && !input.locked() && !e.repeat && !hud.startOpen()) {
     showMenu(menuClosed);
     if (menuClosed) input.requestLock(); // usually refused right after Esc; then the hint asks for a click
     return;
@@ -609,6 +616,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Digit1') saveCheckpoint();
   if (e.code === 'Digit2') teleportCheckpoint();
   if (e.code === 'KeyR') respawn();
+  if (e.code === 'KeyN' && finishShown && nextMap()) hud.apply({ map: nextMap()!.id });
   if (e.code === 'KeyF') renderer.inspect(); // CS's inspect key
 });
 // Knife attacks: left click slashes, right click stabs; holding keeps attacking at CS's rate.
@@ -640,8 +648,23 @@ function tick(cmd: ReturnType<typeof input.cmd>, tickDt: number) {
     practice = true;
   }
   const r = noclip ? null : simTick(map, grid, cur, cmd, tickDt, simState);
-  if (r?.event === 'respawn') return respawn();
+  if (r?.event === 'respawn') {
+    // Past the first stage a fall costs time, not the whole run.
+    const s = map.stages?.[stageNow];
+    if (!s || stageNow === 0 || run.phase !== 'running' || r.reason === 'stuck') return respawn();
+    prev = cur = newPlayer(s.spawn);
+    simState = newTickState();
+    input.setView(s.yaw, 0);
+    lastTickYaw = s.yaw;
+    hud.flash(`Back to stage ${stageNow + 1}`);
+    return;
+  }
   if (r) (cur = r.player), (simState = r.state);
+  if (r?.teleport?.stage !== undefined && map.stages) {
+    stageNow = r.teleport.stage;
+    surf({ text: `Stage ${stageNow + 1} of ${map.stages.length} at ${formatTime(run.time)}` });
+    hud.flash(`Stage ${stageNow + 1} of ${map.stages.length}`);
+  }
   if (r?.teleport) {
     prev = cur;
     if (!r.teleport.keepAngles) {
@@ -667,12 +690,13 @@ function tick(cmd: ReturnType<typeof input.cmd>, tickDt: number) {
   if (finish) {
     if (finish !== 'record') {
       surf({ text: `Practice run: ${formatTime(run.time)}. ${finish === 'practice' ? 'Checkpoints or noclip were used' : 'Server settings differ from the defaults (sv_defaults restores them)'}, so it isn't saved.`, tone: 'bad' });
-      hud.flash(`Practice: ${formatTime(run.time)}`);
+      showFinish('Practice run', finish === 'practice' ? 'Checkpoints or noclip were used, so it isn\'t saved' : 'Server settings differ from the defaults, so it isn\'t saved', 'bad');
     } else {
       const r = recordFinish(records, runTrack(), map.id, run.time, Date.now());
       records = r.all;
       saveRecords(records);
       announceFinish(r);
+      showFinish(r.kind === 'first' ? 'First record!' : r.kind === 'pb' ? 'New personal best!' : 'Finished', r.kind === 'first' ? '' : `${signed(r.delta)} vs your best`, r.kind === 'slower' ? 'bad' : 'good');
       refreshRecords();
       // A new best becomes the ghost you race next time.
       const g = r.kind !== 'slower' ? ghostFromTicks(recording, tickDt) : null;
@@ -721,4 +745,3 @@ function frame(now: number) {
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
-

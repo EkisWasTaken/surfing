@@ -2,7 +2,7 @@ import { config, setGameMode, GameMode } from './config';
 
 export type Settings = { name: string; game: GameMode; sensitivity: number; fov: number; tickrate: 64 | 128; autobhop: boolean; showSpeed: boolean; map: string; jumpBind: string; showGhost: boolean; showViewmodel: boolean; knife: string; finish: string; wear: number; seed: number };
 
-export const defaults: Settings = { name: 'Player', game: 'csgo', sensitivity: 2, fov: 90, tickrate: 64, autobhop: true, showSpeed: true, map: 'sandbox', jumpBind: 'Space', showGhost: true, showViewmodel: true, knife: 'knife_default_ct', finish: '', wear: 0.01, seed: 0 };
+export const defaults: Settings = { name: 'Player', game: 'csgo', sensitivity: 2, fov: 90, tickrate: 64, autobhop: true, showSpeed: true, map: 'warmup', jumpBind: 'Space', showGhost: true, showViewmodel: true, knife: 'knife_default_ct', finish: '', wear: 0.01, seed: 0 };
 
 const KEY = 'surf-settings';
 const num = (v: unknown, min: number, max: number, fallback: number) =>

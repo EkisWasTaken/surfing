@@ -7,6 +7,8 @@ import { parseModel } from './mdl';
 import { createViewmodel } from './viewmodel';
 import type { Pose } from './viewmodelPose';
 import type { BspMap } from './bsp';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { THEMES, Theme } from './maps/build';
 
 // The only place Source coords (x fwd, y left, z up) become three.js coords (x, y up, z).
 const toThree = (v: Vec3) => new THREE.Vector3(v.x, v.z, -v.y);
@@ -35,7 +37,7 @@ function surfaceMaterial(image: HTMLCanvasElement, scale: number, flat?: HTMLCan
   return new THREE.ShaderMaterial({
     defines: flat ? { BSP: 1 } : {},
     vertexColors: !!flat,
-    uniforms: { map: { value: texture(image) }, flatMap: { value: texture(flat ?? image) }, lightmap: { value: null }, exposure: { value: 1 }, scale: { value: scale }, sun: { value: SUN }, haze: { value: HORIZON }, ...mapFog },
+    uniforms: { tint: { value: new THREE.Color(1, 1, 1) }, useTint: { value: 0 }, light: { value: 1 }, map: { value: texture(image) }, flatMap: { value: texture(flat ?? image) }, lightmap: { value: null }, exposure: { value: 1 }, scale: { value: scale }, sun: { value: SUN }, haze: { value: HORIZON }, ...mapFog },
     vertexShader: /* glsl */ `
       varying vec3 vWorld; varying vec3 vNormal; varying vec3 vTint;
       #ifdef BSP
@@ -55,7 +57,7 @@ function surfaceMaterial(image: HTMLCanvasElement, scale: number, flat?: HTMLCan
         gl_Position = projectionMatrix * viewMatrix * w;
       }`,
     fragmentShader: /* glsl */ `
-      uniform sampler2D map; uniform sampler2D flatMap; uniform sampler2D lightmap; uniform float exposure; uniform float scale; uniform vec3 sun; uniform vec3 haze;
+      uniform sampler2D map; uniform sampler2D flatMap; uniform sampler2D lightmap; uniform vec3 tint; uniform float useTint; uniform float light; uniform float exposure; uniform float scale; uniform vec3 sun; uniform vec3 haze;
       ${FOG_GLSL}
       varying vec3 vWorld; varying vec3 vNormal; varying vec3 vTint;
       #ifdef BSP
@@ -67,6 +69,9 @@ function surfaceMaterial(image: HTMLCanvasElement, scale: number, flat?: HTMLCan
         vec3 w = pow(abs(n), vec3(4.0)); w /= w.x + w.y + w.z;
         vec3 p = vWorld / scale;
         vec3 albedo = tri(map, p, w);
+        #ifndef BSP
+          albedo = mix(albedo, vec3(dot(albedo, vec3(0.3, 0.6, 0.1))) * tint * 1.7, useTint); // a theme's colour, keeping the stone's detail
+        #endif
         #ifdef BSP
           albedo = mix(albedo, tri(flatMap, p, w), smoothstep(0.6, 0.8, n.y)) * clamp(vTint * 2.2, 0.35, 1.6);
         #endif
@@ -75,7 +80,7 @@ function surfaceMaterial(image: HTMLCanvasElement, scale: number, flat?: HTMLCan
           vec3 color = albedo * l * l * 4.0 * exposure;
         #else
           float diffuse = max(dot(n, sun), 0.0);
-          vec3 color = albedo * (vec3(0.42, 0.38, 0.36) + vec3(1.0, 0.9, 0.75) * diffuse * 0.85);
+          vec3 color = albedo * (vec3(0.42, 0.38, 0.36) + vec3(1.0, 0.9, 0.75) * diffuse * 0.85) * light;
         #endif
         #ifdef BSP
           gl_FragColor = vec4(applyFog(color, vWorld), 1.0); // imported maps: only the map's own fog
@@ -270,6 +275,34 @@ function propMeshes(props: BspMap['props'], pak: Map<string, Uint8Array>, materi
   return out;
 }
 
+// Non-solid landscape around a built-in map, so speed has something to read against: shapes rising from a ground far
+// below, kept clear of the course. Seeded, so a map always looks the same.
+function sceneryGeometry(brushes: Brush[], killZ: number, kind: Theme['scenery']) {
+  let seed = 4711;
+  const rand = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+  const lo = { x: Math.min(...brushes.map((b) => b.mins.x)), y: Math.min(...brushes.map((b) => b.mins.y)) };
+  const hi = { x: Math.max(...brushes.map((b) => b.maxs.x)), y: Math.max(...brushes.map((b) => b.maxs.y)), z: Math.max(...brushes.map((b) => b.maxs.z)) };
+  const baseZ = killZ - 500, parts: THREE.BufferGeometry[] = [];
+  const clear = (x: number, y: number, r: number) => !brushes.some((b) => x > b.mins.x - r - 500 && x < b.maxs.x + r + 500 && y > b.mins.y - r - 500 && y < b.maxs.y + r + 500);
+  for (let tries = 0; tries < 900 && parts.length < 170; tries++) {
+    const x = lo.x - 9000 + rand() * (hi.x - lo.x + 18000), y = lo.y - 9000 + rand() * (hi.y - lo.y + 18000);
+    const r = 250 + rand() * rand() * 1300, h = (0.25 + rand() * 0.95) * (hi.z - baseZ);
+    if (!clear(x, y, r)) continue;
+    const g = kind === 'spire' ? new THREE.ConeGeometry(r, h, 6) : kind === 'pillar' ? new THREE.BoxGeometry(r * 1.2, h, r * 1.2) : kind === 'mesa' ? new THREE.CylinderGeometry(r * 0.75, r * 1.15, h * 0.6, 8) : new THREE.IcosahedronGeometry(r * 1.2, 0);
+    g.deleteAttribute('uv');
+    const flat = g.index ? g.toNonIndexed() : g; // hard facets, and every part the same layout for merging
+    flat.computeVertexNormals();
+    flat.rotateY(rand() * Math.PI);
+    flat.translate(x, kind === 'rock' ? baseZ + rand() * (hi.z - baseZ) * 0.8 : baseZ + (kind === 'mesa' ? h * 0.3 : h / 2), -y);
+    parts.push(flat);
+  }
+  const ground = new THREE.BoxGeometry(hi.x - lo.x + 60000, 40, hi.y - lo.y + 60000).toNonIndexed();
+  ground.deleteAttribute('uv');
+  ground.translate((lo.x + hi.x) / 2, baseZ - 20, -(lo.y + hi.y) / 2);
+  parts.push(ground);
+  return mergeGeometries(parts)!;
+}
+
 export function createRenderer(canvas: HTMLCanvasElement) {
   let showViewmodel = true;
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -315,7 +348,7 @@ export function createRenderer(canvas: HTMLCanvasElement) {
   resize();
 
   return {
-    setMap(map: { brushes: Brush[]; mesh?: BspMap['mesh']; pak?: BspMap['pak']; props?: BspMap['props']; lightmap?: BspMap['lightmap']; skyName?: string; fog?: BspMap['fog'] }) {
+    setMap(map: { theme?: Theme; killZ: number; brushes: Brush[]; mesh?: BspMap['mesh']; pak?: BspMap['pak']; props?: BspMap['props']; lightmap?: BspMap['lightmap']; skyName?: string; fog?: BspMap['fog'] }) {
       const geometries = new Set<THREE.BufferGeometry>();
       world.traverse((o) => o instanceof THREE.Mesh && geometries.add(o.geometry));
       geometries.forEach((g) => g.dispose());
@@ -330,7 +363,14 @@ export function createRenderer(canvas: HTMLCanvasElement) {
         skybox = null;
       }
       sky.visible = true;
-      setSkyColors({ horizon: HORIZON, zenith: ZENITH, ground: GROUND }); // built-in maps keep the desert sky
+      const theme: Theme = map.theme ?? THEMES.desert;
+      setSkyColors({ horizon: new THREE.Color(theme.horizon), zenith: new THREE.Color(theme.zenith), ground: new THREE.Color(theme.ground) });
+      for (const [mat, colour] of [[rampMat, map.mesh ? null : theme.ramp], [floorMat, map.mesh ? null : theme.floor]] as const) {
+        mat.uniforms.useTint.value = colour ? 1 : 0;
+        if (colour) mat.uniforms.tint.value.set(colour);
+        mat.uniforms.light.value = map.mesh ? 1 : theme.light;
+        mat.uniforms.haze.value = new THREE.Color(theme.haze);
+      }
       if (map.mesh) {
         // The map's own textures where packed and decodable, desert fallback elsewhere.
         if (map.lightmap) {
@@ -357,6 +397,7 @@ export function createRenderer(canvas: HTMLCanvasElement) {
         for (const p of propMeshes(map.props ?? [], map.pak ?? new Map(), (c) => src.get(c, false) ?? floorMat)) world.add(p);
         return { ...src.stats(), s3tc };
       }
+      world.add(new THREE.Mesh(sceneryGeometry(map.brushes, map.killZ, theme.scenery), floorMat));
       for (const b of map.brushes) world.add(new THREE.Mesh(b.kind === 'ramp' ? rampGeometry(b) : boxGeometry(b), b.kind === 'ramp' ? rampMat : floorMat));
       return null;
     },

@@ -6,7 +6,8 @@ import { readZip } from './pak';
 
 // landmark: arrive at the same offset from dest as from the landmark, keeping angles and velocity.
 // keepAngles: landmark or the "preserve angles" flag; otherwise the view turns to the destination's yaw.
-export type Teleport = { brushes: Brush[]; dest: Vec3; yaw: number; landmark: Vec3 | null; keepAngles: boolean };
+// stop: arrive standing still. stage: entering it moves the run on to this stage of a built-in map.
+export type Teleport = { brushes: Brush[]; dest: Vec3; yaw: number; landmark: Vec3 | null; keepAngles: boolean; stop?: boolean; stage?: number };
 // trigger_hurt: damage per second (Source/GoldSrc default 10), dealt in half-second doses.
 export type Hurt = { brushes: Brush[]; damage: number };
 // trigger_push: base velocity while inside; `once` pushes a single impulse on entry.

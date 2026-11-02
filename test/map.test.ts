@@ -5,6 +5,8 @@ import { trace } from '../src/trace';
 import { step, newPlayer, Cmd, Player } from '../src/movement';
 import { config } from '../src/config';
 import { vec, scale, sub, dot } from '../src/math';
+import { createGrid } from '../src/grid';
+import { simTick, newTickState } from '../src/sim';
 
 const { mins, maxs } = config.hullStand;
 const idle: Cmd = { forward: 0, side: 0, jump: false, duck: false, yaw: 0, pitch: 0 };
@@ -40,7 +42,8 @@ describe.each(maps.map((m) => [m.name, m] as const))('%s', (_, map) => {
     for (const r of ramps) expect(slopeOf(r).normal.z).toBeLessThan(0.7);
   });
 
-  it.each(ramps.slice(0, -1).map((_, i) => i))('leaving ramp %i at 1300 u/s reaches the next one', (i) => {
+  // Within a stage: the last ramp of a stage leads to its pad, not to the next stage's first ramp.
+  it.each(ramps.slice(0, -1).map((_, i) => i).filter((i) => !map.stageEnds?.includes(i)))('leaving ramp %i at 1300 u/s reaches the next one', (i) => {
     const [r1, r2] = [ramps[i], ramps[i + 1]];
     const d1 = axisOf(r1), d2 = axisOf(r2);
     const turn = Math.sign(d1.x * d2.y - d1.y * d2.x); // +1 = left turn
@@ -65,3 +68,52 @@ describe('findMap', () => {
     expect(findMap('spire').id).toBe('spire');
   });
 });
+
+describe.each(maps.filter((m) => m.stages).map((m) => [m.name, m] as const))('stages of %s', (_, map) => {
+  const grid = createGrid(map.brushes);
+
+  it('has a teleport into every stage after the first, landing on its platform', () => {
+    expect(map.teleports).toHaveLength(map.stages!.length - 1);
+    map.teleports.forEach((t, i) => {
+      expect(t.stage).toBe(i + 1);
+      expect(t.dest).toEqual(map.stages![i + 1].spawn);
+    });
+  });
+  it('a stage pad moves you on, standing still', () => {
+    for (const t of map.teleports) {
+      const z = t.brushes[0];
+      const p = { ...newPlayer(vec((z.mins.x + z.maxs.x) / 2, (z.mins.y + z.maxs.y) / 2, z.mins.z + 1)), vel: vec(900, 0, -300) };
+      const r = simTick(map, grid, p, idle, 1 / 64, newTickState());
+      expect(r.event).toBe('teleport');
+      expect(r.teleport?.stage).toBe(t.stage);
+      expect(r.player.vel).toEqual(vec());
+    }
+  });
+  it('every stage starts on solid ground', () => {
+    for (const s of map.stages!) {
+      let p = newPlayer(s.spawn);
+      for (let i = 0; i < 32; i++) p = step(p, idle, map.brushes, 1 / 64);
+      expect(p.onGround).toBe(true);
+    }
+  });
+});
+
+describe.each(maps.filter((m) => m.stages).map((m) => [m.name, m] as const))('stage ends of %s', (_, map) => {
+  it('leaving each stage\'s last ramp at 1300 u/s reaches its pad', () => {
+    const grid = createGrid(map.brushes), ramps = map.brushes.filter((b) => b.kind === 'ramp');
+    map.stageEnds!.forEach((end, i) => {
+      const last = ramps[end];
+      let p = { ...newPlayer(vec(last.maxs.x - 150, (last.mins.y + last.maxs.y) / 2, last.maxs.z + 40)), vel: vec(1300, 0, 0) };
+      let state = newTickState(), arrived = false;
+      for (let t = 0; t < 640 && !arrived; t++) {
+        const r = simTick(map, grid, p, idle, 1 / 64, state);
+        state = r.state;
+        arrived = r.teleport?.stage === i + 1 || (i === map.stageEnds!.length - 1 && map.endZone![0].mins.x <= r.player.pos.x && r.player.onGround);
+        if (r.event === 'respawn') break;
+        p = r.player;
+      }
+      expect(arrived).toBe(true);
+    });
+  });
+});
+

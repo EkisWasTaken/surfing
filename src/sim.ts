@@ -56,7 +56,7 @@ export function simTick(map: MapDef, grid: Grid, cur: Player, cmd: Cmd, dt: numb
   // Source keeps velocity through a trigger_teleport (it only sets angles); Half-Life/CS 1.6 zero it.
   // A landmark keeps the player's offset from it, and the velocity, in both.
   const dest = tp.landmark ? add(tp.dest, sub(p.pos, tp.landmark)) : tp.dest;
-  const keep = config.teleportKeepsVelocity || !!tp.landmark;
+  const keep = !tp.stop && (config.teleportKeepsVelocity || !!tp.landmark);
   const arrived = { ...newPlayer(unstick(dest, around(grid, dest, 256))), ducked: p.ducked, vel: keep ? p.vel : vec(), stamina: p.stamina };
   return { player: arrived, event: 'teleport', teleport: tp, state: next };
 }
