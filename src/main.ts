@@ -1,5 +1,5 @@
 import './style.css';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { GLTFLoader, GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import karambitModel from './assets/viewmodel/karambit.glb?url';
 import m9Model from './assets/viewmodel/m9.glb?url';
 import retroModel from './assets/viewmodel/retro.glb?url';
@@ -29,6 +29,11 @@ import { modeDefault } from './config';
 import { angleVectors, normalize } from './math';
 import { Settings, loadSettings, saveSettings, applySettings } from './settings';
 
+// three.js needs WebGL 2. Without it the game can't start, so say so rather than leave a blank page.
+if (!document.createElement('canvas').getContext('webgl2')) {
+  document.body.innerHTML = '<p style="margin:0;padding:15vh 24px;font:18px/1.5 system-ui,sans-serif;text-align:center;color:#eee;background:#222;min-height:100vh;box-sizing:border-box">This game needs WebGL 2, and your browser couldn\'t start it.<br>Turn on hardware acceleration in your browser\'s settings, or try another browser.</p>';
+  throw new Error('WebGL 2 is not available');
+}
 const canvas = document.querySelector<HTMLCanvasElement>('#game')!;
 const input = createInput(canvas);
 const renderer = createRenderer(canvas);
@@ -510,11 +515,17 @@ renderer.setShowViewmodel(settings.showViewmodel);
 const gltf = new GLTFLoader();
 // The game's own knives, each loaded when picked (its file carries the arms too).
 const OWN_KNIVES = [{ id: 'knife_karambit', name: 'Karambit', url: karambitModel }, { id: 'knife_m9', name: 'M9 Bayonet', url: m9Model }];
+const ownKnifeLoads = new Map<string, Promise<GLTF>>(); // each knife is loaded once and kept, so switching back costs nothing
 function loadOwnKnife(id: string) {
   const k = OWN_KNIVES.find((x) => x.id === id) ?? OWN_KNIVES[0];
-  gltf.load(k.url, (g) => {
-    if ((OWN_KNIVES.find((x) => x.id === settings.knife) ?? OWN_KNIVES[0]) === k) renderer.setOwn('csgo', g.scene, g.animations); // a newer pick wins the race
-  }, undefined, (e) => console.warn('viewmodel:', e));
+  if (!ownKnifeLoads.has(k.id)) ownKnifeLoads.set(k.id, gltf.loadAsync(k.url));
+  ownKnifeLoads.get(k.id)!.then((g) => {
+    if (OWN_MODELS && (OWN_KNIVES.find((x) => x.id === settings.knife) ?? OWN_KNIVES[0]) !== k) return; // a newer pick won the race
+    renderer.setOwn('csgo', g.scene, g.animations);
+  }).catch((e) => {
+    ownKnifeLoads.delete(k.id); // let a later pick try again
+    console.warn('viewmodel:', e);
+  });
 }
 if (OWN_MODELS) {
   hud.setKnives(OWN_KNIVES);
