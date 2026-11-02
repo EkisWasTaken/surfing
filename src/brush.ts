@@ -43,6 +43,22 @@ export function makeRamp(origin: Vec3, length: number, width: number, height: nu
   return { kind: 'ramp', mins: origin, maxs, corners, planes: [...makeBox(origin, maxs).planes, plane(n, top)] };
 }
 
+// A ramp piece between two cross-sections, each [wall bottom, wall top, foot], at any heading. The sections must be
+// level and their top and foot edges parallel, so the slope is flat. Used for straight ramps off-axis and for curves.
+export function makePrism(a: [Vec3, Vec3, Vec3], b: [Vec3, Vec3, Vec3]): Brush {
+  const corners = [...a, ...b];
+  const axis = (k: 'x' | 'y' | 'z', f: (...v: number[]) => number) => f(...corners.map((c) => c[k]));
+  const mins = vec(axis('x', Math.min), axis('y', Math.min), axis('z', Math.min));
+  const maxs = vec(axis('x', Math.max), axis('y', Math.max), axis('z', Math.max));
+  const centre = scale(corners.reduce((s, c) => add(s, c), vec()), 1 / 6);
+  const face = (p: Vec3, q: Vec3, r: Vec3) => {
+    const n = normalize(cross(sub(q, p), sub(r, p)));
+    return plane(dot(n, sub(centre, p)) > 0 ? scale(n, -1) : n, p); // pointing out of the piece
+  };
+  // The bounding box planes double as bevels, as in makeRamp. The slope stays last, for slopeOf.
+  return { kind: 'ramp', mins, maxs, corners, planes: [...makeBox(mins, maxs).planes, face(a[0], a[1], b[1]), face(a[0], a[1], a[2]), face(b[0], b[1], b[2]), face(a[1], a[2], b[2])] };
+}
+
 // The same brush moved by o.
 export function translated(b: Brush, o: Vec3): Brush {
   return {

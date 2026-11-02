@@ -6,7 +6,7 @@ No game files are included. The game reads maps, knives and textures from your o
 
 ## Two versions
 
-- **The hosted game** is what `npm run build` produces and what GitHub Pages serves. It's instantly playable from a link, with 6 original maps and nothing from Steam: no Valve models, skins or textures. Its arms and knife are licensed models (see Credits). The two movement modes are called Modern and Classic. Anyone can still open a `.bsp` they already have with "Load .bsp file"; it stays in their own browser.
+- **The hosted game** is what `npm run build` produces and what GitHub Pages serves. It's instantly playable from a link, with 8 original maps and nothing from Steam: no Valve models, skins or textures. Its arms and knife are licensed models (see Credits). The two movement modes are called Modern and Classic. Anyone can still open a `.bsp` they already have with "Load .bsp file"; it stays in their own browser.
 - **The local version** (`npm run dev` after `npm run import-maps`) has everything below, read from your own Steam installs.
 
 ### Hosting it
@@ -47,7 +47,7 @@ npm install
 npm run dev
 ```
 
-Open http://localhost:5173. Six built-in maps work right away. For real maps, knives and skins, import them from your Steam installs:
+Open http://localhost:5173. Eight built-in maps work right away. For real maps, knives and skins, import them from your Steam installs:
 
 ```bash
 npm run import-maps

@@ -11,6 +11,7 @@ export const THEMES = {
   dusk: { horizon: '#f08a5d', zenith: '#3b2a6b', ground: '#4a2c55', haze: '#c77c74', ramp: '#c9668a', floor: '#6d4a78', light: 0.9, scenery: 'rock' },
   sunset: { horizon: '#f7b267', zenith: '#7a5fa8', ground: '#a8705a', haze: '#eeb07a', ramp: '#e08e5a', floor: '#c9a98a', light: 1, scenery: 'mesa' },
   ember: { horizon: '#e0603a', zenith: '#2a1a1e', ground: '#2e2020', haze: '#9a4a30', ramp: '#a65a44', floor: '#55403a', light: 0.85, scenery: 'spire' },
+  aurora: { horizon: '#7fd6c2', zenith: '#1c2a5e', ground: '#1a2a3a', haze: '#5a9fb0', ramp: '#5ad1c0', floor: '#3c5a6e', light: 0.9, scenery: 'spire' },
   night: { horizon: '#2c3f66', zenith: '#0a1230', ground: '#141a2e', haze: '#28406a', ramp: '#4fa0c8', floor: '#3a4a66', light: 0.75, scenery: 'pillar' },
 } satisfies Record<string, Theme>;
 

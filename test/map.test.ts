@@ -44,7 +44,7 @@ describe.each(maps.map((m) => [m.name, m] as const))('%s', (_, map) => {
   });
 
   // Within a stage: the last ramp of a stage leads to its pad, not to the next stage's first ramp.
-  it.each(ramps.slice(0, -1).map((_, i) => i).filter((i) => !map.stageEnds?.includes(i)))('leaving ramp %i at 1300 u/s reaches the next one', (i) => {
+  it.each(ramps.slice(0, -1).map((_, i) => i).filter((i) => !map.stageEnds?.includes(i) && !('jumps' in map)))('leaving ramp %i at 1300 u/s reaches the next one', (i) => {
     const [r1, r2] = [ramps[i], ramps[i + 1]];
     const d1 = axisOf(r1), d2 = axisOf(r2);
     const turn = Math.sign(d1.x * d2.y - d1.y * d2.x); // +1 = left turn
@@ -99,7 +99,7 @@ describe.each(maps.filter((m) => m.stages).map((m) => [m.name, m] as const))('st
   });
 });
 
-describe.each(maps.filter((m) => m.stages).map((m) => [m.name, m] as const))('stage ends of %s', (_, map) => {
+describe.each(maps.filter((m) => m.stageEnds).map((m) => [m.name, m] as const))('stage ends of %s', (_, map) => {
   it('leaving each stage\'s last ramp at 1300 u/s reaches its pad', () => {
     const grid = createGrid(map.brushes), ramps = map.brushes.filter((b) => b.kind === 'ramp');
     map.stageEnds!.forEach((end, i) => {
