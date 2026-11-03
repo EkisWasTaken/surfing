@@ -796,7 +796,7 @@ fetch(assetUrl('/maps/index.json'))
 }
 
 // Desktop app only: real models, knives, skins and maps from the player's own CS install.
-type GameFolders = { csgo: string | null; halfLife: string | null };
+type GameFolders = { csgo: string | null; halfLife: string | null; backup: string | null };
 const gameFolders = (): Promise<GameFolders> => fetch(`${STEAM}/info`).then((r) => r.json());
 function importRealModels() {
   const fail = (why: string) => {
@@ -838,7 +838,7 @@ if (DESKTOP) {
   tauri?.core.invoke('check_update').then((v) => v && hud.showUpdate(`Update to ${v}`)).catch(() => {}); // offline, or no release yet: nothing to offer
   gameFolders()
     .then((f) => {
-      const found = [f.csgo && 'CS2/CS:GO', f.halfLife && 'CS 1.6'].filter(Boolean).join(' and ');
+      const found = [f.backup && 'your model backup', f.csgo && 'CS2/CS:GO', f.halfLife && 'CS 1.6'].filter(Boolean).join(' and ');
       if (USING_REAL) hud.setRealModels({ note: 'Using the knives, skins and maps from your own Counter-Strike. These files stay on this PC.', importLabel: 'Import again', canRemove: true });
       else if (found) {
         hud.setRealModels({ note: `Found ${found}. Importing uses the knives, skins and maps from your own copy, and takes about a minute. These files stay on this PC.`, importLabel: 'Import from my CS install', canRemove: false });

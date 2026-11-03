@@ -77,10 +77,16 @@ fn games() -> &'static Games {
     })
 }
 
+// Documents/surf-model-backup, a player's own copy of the model files: the import prefers it. Set once at startup.
+static BACKUP: OnceLock<Option<PathBuf>> = OnceLock::new();
+fn backup() -> Option<&'static PathBuf> {
+    BACKUP.get().and_then(Option::as_ref)
+}
+
 fn inside_games(path: &str) -> Option<PathBuf> {
     let real = Path::new(path).canonicalize().ok()?;
     let g = games();
-    [&g.csgo, &g.half_life].into_iter().flatten().any(|root| real.starts_with(root)).then_some(real)
+    [&g.csgo, &g.half_life].into_iter().flatten().chain(backup()).any(|root| real.starts_with(root)).then_some(real)
 }
 
 // A plain relative path only: nothing that can climb out of the app's own folder.
@@ -129,9 +135,9 @@ fn route(request: Request<Vec<u8>>, cache: Option<PathBuf>) -> Response<Vec<u8>>
     let cached = q.get("p").and_then(|p| safe_relative(p)).zip(cache.as_ref()).map(|(rel, dir)| dir.join(rel));
     match (request.method().as_str(), url.path()) {
         ("GET", "/info") => {
-            let text = |p: &Option<PathBuf>| p.as_ref().map(|p| p.to_string_lossy().trim_start_matches("\\\\?\\").replace('\\', "/"));
+            let text = |p: Option<&PathBuf>| p.map(|p| p.to_string_lossy().trim_start_matches("\\\\?\\").replace('\\', "/"));
             let g = games();
-            answer(StatusCode::OK, JSON_TYPE, serde_json::json!({ "csgo": text(&g.csgo), "halfLife": text(&g.half_life) }).to_string().into_bytes())
+            answer(StatusCode::OK, JSON_TYPE, serde_json::json!({ "csgo": text(g.csgo.as_ref()), "halfLife": text(g.half_life.as_ref()), "backup": text(backup()) }).to_string().into_bytes())
         }
         ("GET", "/exists") => answer(StatusCode::OK, "text/plain", inside_games(path).is_some().to_string().into_bytes()),
         ("GET", "/list") => match inside_games(path).and_then(|p| fs::read_dir(p).ok()) {
@@ -178,6 +184,12 @@ fn route(request: Request<Vec<u8>>, cache: Option<PathBuf>) -> Response<Vec<u8>>
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .setup(|app| {
+            // Windows' Documents can be a OneDrive folder, so the plain one in the home folder counts too.
+            let places = [app.path().document_dir().ok(), app.path().home_dir().ok().map(|h| h.join("Documents"))];
+            let _ = BACKUP.set(places.into_iter().flatten().find_map(|d| d.join("surf-model-backup").canonicalize().ok()));
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![quit, check_update, install_update])
         .register_asynchronous_uri_scheme_protocol("surfsteam", |ctx, request, responder| {
             let cache = ctx.app_handle().path().app_local_data_dir().ok().map(|d| d.join("imported"));

@@ -1,6 +1,6 @@
 // The desktop app's Steam import, off the main thread. The decoders read files synchronously, and a worker's
 // synchronous requests can return bytes, so they run unchanged against the app's local file service (src-tauri).
-import { runImport } from './steam-import';
+import { runImport, ImportPaths } from './steam-import';
 import { STEAM } from './hosted';
 
 const q = encodeURIComponent;
@@ -15,7 +15,7 @@ function request(method: string, url: string, body?: string | Uint8Array, bytes 
 const bytesOf = (url: string) => new Uint8Array(request('GET', url).response as ArrayBuffer);
 const textOf = (url: string) => request('GET', url, undefined, false).responseText;
 
-self.onmessage = async (e: MessageEvent<{ csgo: string | null; halfLife: string | null }>) => {
+self.onmessage = async (e: MessageEvent<ImportPaths>) => {
   const maps: string[] = [];
   try {
     const result = await runImport(

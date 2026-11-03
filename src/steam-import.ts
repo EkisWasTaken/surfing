@@ -33,7 +33,8 @@ export type ImportHost = {
   // The maps to bundle stock textures for, given CS:GO's maps folder.
   prepareMaps(mapsDir: string): { file: string; path: string }[];
 };
-export type ImportPaths = { csgo: string | null; halfLife: string | null }; // the two game folders, where installed
+// The two game folders, where installed, and a model backup (Documents/surf-model-backup), which wins for models and skins.
+export type ImportPaths = { csgo: string | null; halfLife: string | null; backup?: string | null };
 export type ImportResult = { knives: number; finishes: number; cs16: boolean; maps: number };
 
 export async function runImport(host: ImportHost, paths: ImportPaths, say: (line: string, fraction?: number) => void): Promise<ImportResult> {
@@ -43,6 +44,12 @@ export async function runImport(host: ImportHost, paths: ImportPaths, say: (line
     const vpk = readVpkDir(dir);
     const archive = (i: number, offset: number, length: number) => host.readRange(dirFile.replace(/_dir\.vpk$/, `_${String(i).padStart(3, '0')}.vpk`), offset, length);
     return { entries: vpk.entries, read: (key: string) => readVpkFile(vpk.entries.get(key)!, dir, vpk.dataStart, archive) };
+  };
+  // The same files as the archive, loose. skin-names.txt adds the preview images, which are only ever looked up by name.
+  const openBackup = (root: string) => {
+    const text = (file: string) => new TextDecoder().decode(host.read(`${root}/${file}`)).split(/\r?\n/).filter(Boolean);
+    const files = new Set(text('files.txt').map((row) => row.split('  ')[2]).filter((f) => f?.startsWith('cs2/')).map((f) => f.slice(4)));
+    return { keys: [...files, ...text('skin-names.txt')], has: (key: string) => files.has(key), read: (key: string) => host.read(`${root}/cs2/${key}`) };
   };
   const mapsDir = paths.csgo && `${paths.csgo}/csgo/maps`;
   const mapFiles = mapsDir && host.exists(mapsDir) ? host.prepareMaps(mapsDir) : [];
@@ -64,9 +71,12 @@ export async function runImport(host: ImportHost, paths: ImportPaths, say: (line
     lookup = createCs2Lookup(cs2.entries, cs2.read);
     say('Stock textures: converted from CS2 (partial; install csgo_legacy for the exact set).');
   }
+  const backup = paths.backup && host.exists(`${paths.backup}/files.txt`) && host.exists(`${paths.backup}/skin-names.txt`) ? paths.backup : null;
+  if (backup) say('Models and skins: your backup folder.');
+  const models = backup ? openBackup(backup) : cs2 && { keys: [...cs2.entries.keys()], has: (key: string) => cs2.entries.has(key), read: cs2.read };
   // First-person viewmodel from CS2's own files (maps don't need it): the arms, and every knife with its animations.
-  if (cs2) {
-    const get = (path: string) => (cs2.entries.has(path) ? cs2.read(path) : undefined);
+  if (models) {
+    const get = (path: string) => (models.has(path) ? models.read(path) : undefined);
     const data = (path: string) => parseKV3(resourceBlocks(get(path)!).find((b) => b.type === 'DATA')!.data) as Any;
     const f32 = (a: Float32Array) => b64(new Uint8Array(a.buffer, a.byteOffset, a.byteLength));
     try {
@@ -78,7 +88,7 @@ export async function runImport(host: ImportHost, paths: ImportPaths, say: (line
     } catch (e) {
       say(`Arms: skipped (${e instanceof Error ? e.message : e})`);
     }
-    const keys = [...cs2.entries.keys()];
+    const keys = models.keys;
     const tex = (path: string | undefined) => {
       const b = path && get(path.toLowerCase() + '_c');
       return b ? readVtex(b) : null;
@@ -202,8 +212,8 @@ export async function runImport(host: ImportHost, paths: ImportPaths, say: (line
   }
 
   // CS 1.6 viewmodel (Steam: Counter-Strike, in the Half-Life folder): copied as-is, the game parses it.
-  const cs16Knife = paths.halfLife && `${paths.halfLife}/cstrike/models/v_knife.mdl`;
-  if (cs16Knife && host.exists(cs16Knife)) {
+  const cs16Knife = [backup && `${backup}/cs1.6/cstrike/models/v_knife.mdl`, paths.halfLife && `${paths.halfLife}/cstrike/models/v_knife.mdl`].find((p) => p && host.exists(p));
+  if (cs16Knife) {
     host.write('cs16/v_knife.mdl', host.read(cs16Knife));
     result.cs16 = true;
     say('CS 1.6 knife copied');
