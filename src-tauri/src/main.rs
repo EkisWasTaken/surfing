@@ -186,8 +186,9 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             // Windows' Documents can be a OneDrive folder, so the plain one in the home folder counts too.
-            let places = [app.path().document_dir().ok(), app.path().home_dir().ok().map(|h| h.join("Documents"))];
-            let _ = BACKUP.set(places.into_iter().flatten().find_map(|d| d.join("surf-model-backup").canonicalize().ok()));
+            let docs = [app.path().document_dir().ok(), app.path().home_dir().ok().map(|h| h.join("Documents"))];
+            let places = docs.into_iter().flatten().flat_map(|d| [d.join("surf-sandbox").join("surf-model-backup"), d.join("surf-model-backup")]);
+            let _ = BACKUP.set(places.into_iter().find_map(|p| p.canonicalize().ok()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![quit, check_update, install_update])

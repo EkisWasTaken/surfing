@@ -42,7 +42,7 @@ The build leaves out `public/`, where imported Steam files live, so `dist` is al
 
 `npm run app` builds a small Windows app around the hosted game (needs Rust and the Visual Studio C++ tools). If the project path is long, set `CARGO_TARGET_DIR` to a short folder first.
 
-The app contains no Valve files. When a player has Counter-Strike in Steam, the app imports it by itself on launch: it reads their own CS2/CS:GO and CS 1.6 folders and builds the real knives, skins, arms and maps list in its data folder on that PC, in about a minute. **Back to built-in models** on the Display tab deletes those files and stays that way; **Import from my CS install** brings them back. If `surf-model-backup` exists in Documents or in the home folder's `Documents`, with `files.txt` and `skin-names.txt`, knives, skins and arms come from there instead; maps and their textures still come from Steam. Without CS, the game uses its built-in models. The app can only read those two game folders and its own data.
+The app contains no Valve files. When a player has Counter-Strike in Steam, the app imports it by itself on launch: it reads their own CS2/CS:GO and CS 1.6 folders and builds the real knives, skins, arms and maps list in its data folder on that PC, in about a minute. **Back to built-in models** on the Display tab deletes those files and stays that way; **Import from my CS install** brings them back. If `surf-model-backup` exists in `surf-sandbox` or directly in Documents (or the home folder's `Documents`), with `files.txt` and `skin-names.txt`, knives, skins and arms come from there instead; maps and their textures still come from Steam. Without CS, the game uses its built-in models. The app can only read those two game folders and its own data.
 
 ## Publishing
 

@@ -14,3 +14,4 @@ src-tauri/gen
 worker/.group-code.txt
 _site
 release/
+surf-model-backup/
