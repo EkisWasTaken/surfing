@@ -198,7 +198,7 @@ function stepMove(s: State) {
   tryPlayerMove(s);
   const tr = traceHull(s, s.pos, sub(s.pos, vec(0, 0, config.stepSize)));
   if (!tr.startSolid) s.pos = tr.endPos;
-  const steppedToGround = tr.fraction < 1 && tr.normal!.z >= 0.7;
+  const steppedToGround = tr.fraction < 1 && (tr.normal?.z ?? 0) >= 0.7; // no normal: the whole trace was inside something
 
   const hdist = (p: Vec3) => (p.x - pos0.x) ** 2 + (p.y - pos0.y) ** 2;
   if (!steppedToGround || hdist(downPos) >= hdist(s.pos)) {

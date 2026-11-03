@@ -9,7 +9,7 @@ export function buildBsp(opts: {
   submodels: BoxSpec[][]; // models 1..n
   // light.size = luxels per axis minus one (Source's LightmapTextureSizeInLuxels); samples are [r, g, b, exp] per luxel.
   // Lightmap axes: s = x/256 + 2, t = y/256 + 2 (so a ±512 face spans luxels 0..4).
-  face?: { verts: number[][]; reflectivity: number[]; name: string; flags: number; normal?: number[]; light?: { size: number[]; samples: number[][] }; model?: number; side?: number }[]; // faces must be grouped by model, in order
+  face?: { verts: number[][]; reflectivity: number[]; name: string; flags: number; normal?: number[]; light?: { size: number[]; samples: number[][] }; model?: number; side?: number; disp?: { start: number[]; power: number; contents: number; offset: (i: number) => number[] } }[]; // faces must be grouped by model, in order
   // Put lighting in the HDR lumps only (53 + face table 58), leaving the LDR face offsets meaningless, as real HDR-only maps do.
   hdrOnly?: boolean;
   lzmaLump?: boolean;
@@ -47,6 +47,16 @@ export function buildBsp(opts: {
   });
 
   const faces = opts.face ?? [];
+  const dispFaces = faces.filter((f) => f.disp);
+  const dispVerts: number[][] = [];
+  const dispFirst = dispFaces.map((f) => {
+    const first = dispVerts.length, side = (1 << f.disp!.power) + 1;
+    for (let i = 0; i < side * side; i++) {
+      const o = f.disp!.offset(i), d = Math.hypot(o[0], o[1], o[2]);
+      dispVerts.push(d ? [o[0] / d, o[1] / d, o[2] / d, d] : [0, 0, 1, 0]);
+    }
+    return first;
+  });
   const verts: number[][] = [];
   const edges: number[][] = [[0, 0]];
   const surfedges: number[] = [];
@@ -81,7 +91,7 @@ export function buildBsp(opts: {
     dv.setInt32(o + 4, faceRecs[i].firstedge, true);
     dv.setInt16(o + 8, faceRecs[i].numedges, true);
     dv.setInt16(o + 10, faceRecs[i].texinfo, true);
-    dv.setInt16(o + 12, -1, true);
+    dv.setInt16(o + 12, dispFaces.indexOf(faces[i]), true);
     dv.setUint8(o + 16, 0); // style 0 = normal light; rest unused (255)
     dv.setUint8(o + 17, 255);
     dv.setUint8(o + 18, 255);
@@ -112,6 +122,8 @@ export function buildBsp(opts: {
     { index: 17, size: 2, count: leafbrushes.length, write: (dv, o, i) => dv.setUint16(o, leafbrushes[i], true) },
     { index: 18, size: 12, count: brushes.length, write: (dv, o, i) => { dv.setInt32(o, brushes[i].first, true); dv.setInt32(o + 4, brushes[i].num, true); dv.setInt32(o + 8, brushes[i].contents, true); } },
     { index: 19, size: 8, count: sides.length, write: (dv, o, i) => dv.setUint16(o, sides[i], true) },
+    { index: 26, size: 176, count: dispFaces.length, write: (dv, o, i) => { const d = dispFaces[i].disp!; d.start.forEach((v, k) => dv.setFloat32(o + k * 4, v, true)); dv.setInt32(o + 12, dispFirst[i], true); dv.setInt32(o + 20, d.power, true); dv.setInt32(o + 32, d.contents, true); dv.setUint16(o + 36, faces.indexOf(dispFaces[i]), true); } },
+    { index: 33, size: 20, count: dispVerts.length, write: (dv, o, i) => dispVerts[i].forEach((v, k) => dv.setFloat32(o + k * 4, v, true)) },
     { index: 43, bytes: new TextEncoder().encode(strData) },
     { index: 35, bytes: gameLump(opts.staticProps) },
     { index: 44, size: 4, count: strOffsets.length, write: (dv, o, i) => dv.setInt32(o, strOffsets[i], true) },

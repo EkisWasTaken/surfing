@@ -59,6 +59,20 @@ export function makePrism(a: [Vec3, Vec3, Vec3], b: [Vec3, Vec3, Vec3]): Brush {
   return { kind: 'ramp', mins, maxs, corners, planes: [...makeBox(mins, maxs).planes, face(a[0], a[1], b[1]), face(a[0], a[1], a[2]), face(b[0], b[1], b[2]), face(a[1], a[2], b[2])] };
 }
 
+// One triangle of sculpted terrain as something solid: a thin slab under a, b, c, whose winding sets which way is up.
+// The bounding box planes double as bevels, as in makeRamp. Null for a triangle with no area.
+export function makeTriPrism(a: Vec3, b: Vec3, c: Vec3, depth = 8): Brush | null {
+  const raw = cross(sub(b, a), sub(c, a));
+  if (dot(raw, raw) < 1e-6) return null;
+  const n = normalize(raw), under = scale(n, -depth);
+  const corners = [a, b, c, add(a, under), add(b, under), add(c, under)];
+  const axis = (k: 'x' | 'y' | 'z', f: (...v: number[]) => number) => f(...corners.map((p) => p[k]));
+  const mins = vec(axis('x', Math.min), axis('y', Math.min), axis('z', Math.min));
+  const maxs = vec(axis('x', Math.max), axis('y', Math.max), axis('z', Math.max));
+  const side = (p: Vec3, q: Vec3) => plane(normalize(cross(sub(q, p), n)), p); // pointing away from the triangle
+  return { kind: 'bsp', mins, maxs, planes: [...makeBox(mins, maxs).planes, plane(n, a), plane(scale(n, -1), corners[3]), side(a, b), side(b, c), side(c, a)] };
+}
+
 // The same brush moved by o.
 export function translated(b: Brush, o: Vec3): Brush {
   return {

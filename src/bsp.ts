@@ -1,7 +1,7 @@
 // Source engine BSP (v19–21, CS:GO/CS:S era) reader: collision brushes, visible faces, entities.
 // The file is untrusted user input: every offset is bounds-checked by DataView, and failures throw clear errors.
 import { Vec3, vec, add, dot, scale, angleVectors } from './math';
-import { makeBox, Brush, Plane } from './brush';
+import { makeBox, makeTriPrism, Brush, Plane } from './brush';
 import { readZip } from './pak';
 
 // landmark: arrive at the same offset from dest as from the landmark, keeping angles and velocity.
@@ -35,14 +35,14 @@ export type BspMap = {
   killZ: number;
 };
 
-const L = { LIGHTING: 8, LIGHTING_HDR: 53, FACES_HDR: 58, GAME: 35, PAKFILE: 40, ENTITIES: 0, PLANES: 1, TEXDATA: 2, VERTEXES: 3, NODES: 5, TEXINFO: 6, FACES: 7, LEAFS: 10, EDGES: 12, SURFEDGES: 13, MODELS: 14, LEAFBRUSHES: 17, BRUSHES: 18, BRUSHSIDES: 19, TEXSTR_DATA: 43, TEXSTR_TABLE: 44 };
+const L = { LIGHTING: 8, LIGHTING_HDR: 53, DISPINFO: 26, DISP_VERTS: 33, FACES_HDR: 58, GAME: 35, PAKFILE: 40, ENTITIES: 0, PLANES: 1, TEXDATA: 2, VERTEXES: 3, NODES: 5, TEXINFO: 6, FACES: 7, LEAFS: 10, EDGES: 12, SURFEDGES: 13, MODELS: 14, LEAFBRUSHES: 17, BRUSHES: 18, BRUSHSIDES: 19, TEXSTR_DATA: 43, TEXSTR_TABLE: 44 };
 // MASK_PLAYERSOLID: solid | window | grate | playerclip | monster.
 const PLAYER_SOLID = 0x1 | 0x2 | 0x8 | 0x10000 | 0x2000000;
 // sky2d | sky | trigger | nodraw | hint | skip
 const HIDDEN_SURF = 0x2 | 0x4 | 0x40 | 0x80 | 0x100 | 0x200;
 const SURF_NOLIGHT = 0x400;
 // Brush entities that are solid in their starting position (doors/movers are treated as static).
-const SOLID_ENTITIES = /^func_(brush|wall|wall_toggle|breakable|door|door_rotating|movelinear|button)$/;
+const SOLID_ENTITIES = /^func_(brush|wall|wall_toggle|breakable|door|door_rotating|movelinear|button|rotating)$/;
 // Brush entities that are drawn (includes non-solid decoration like func_illusionary).
 const VISIBLE_ENTITIES = /^func_(brush|wall|wall_toggle|breakable|door|door_rotating|movelinear|button|illusionary|rotating|lod)$/;
 
@@ -59,6 +59,46 @@ function exposureFor(lums: number[]): number {
 }
 
 type Entity = Record<string, string>;
+
+// A displacement: Source's sculpted terrain, a grid of vertices pushed out from a flat four-sided face.
+// flat: on the base face, which textures and light are mapped by. pos: where the vertex really is.
+export type Disp = { flat: number[][]; pos: number[][]; tris: [number, number, number][]; solid: boolean };
+
+// corners: the base face, in its own order; the grid starts at whichever is nearest start. offset: by grid index.
+export function dispGrid(corners: number[][], start: number[], side: number, offset: (i: number) => number[]) {
+  const dist = (p: number[]) => Math.hypot(p[0] - start[0], p[1] - start[1], p[2] - start[2]);
+  const first = corners.reduce((best, p, i) => (dist(p) < dist(corners[best]) ? i : best), 0);
+  const c = (k: number) => corners[(first + k) % 4];
+  const lerp = (a: number[], b: number[], t: number) => a.map((v, k) => v + (b[k] - v) * t);
+  const flat: number[][] = [], pos: number[][] = [];
+  for (let i = 0; i < side; i++) {
+    const left = lerp(c(0), c(1), i / (side - 1)), right = lerp(c(3), c(2), i / (side - 1));
+    for (let j = 0; j < side; j++) {
+      const p = lerp(left, right, j / (side - 1)), o = offset(i * side + j);
+      flat.push(p);
+      pos.push(p.map((v, k) => v + (o[k] ?? 0)));
+    }
+  }
+  return { flat, pos };
+}
+
+// Each grid square as two triangles, with the diagonal alternating as Source does, wound to face up from the base face.
+export function dispTriangles(side: number, flat: number[][], up: Vec3): [number, number, number][] {
+  const out: [number, number, number][] = [];
+  const add = (a: number, b: number, c: number) => {
+    const [p, q, r] = [flat[a], flat[b], flat[c]];
+    const u = [q[0] - p[0], q[1] - p[1], q[2] - p[2]], w = [r[0] - p[0], r[1] - p[1], r[2] - p[2]];
+    const facing = (u[1] * w[2] - u[2] * w[1]) * up.x + (u[2] * w[0] - u[0] * w[2]) * up.y + (u[0] * w[1] - u[1] * w[0]) * up.z;
+    out.push(facing >= 0 ? [a, b, c] : [a, c, b]);
+  };
+  for (let y = 0; y + 1 < side; y++)
+    for (let x = 0; x + 1 < side; x++) {
+      const i = y * side + x, right = i + 1, down = i + side, both = down + 1;
+      if (i % 2) (add(i, down, right), add(right, down, both));
+      else (add(i, down, both), add(i, both, right));
+    }
+  return out;
+}
 
 export function parseEntities(text: string): Entity[] {
   const out: Entity[] = [];
@@ -163,7 +203,8 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
     SOLID_ENTITIES.test(e.classname ?? '') &&
     enabled(e) &&
     !(e.classname === 'func_brush' && e.Solidity === '1') &&
-    !(e.classname === 'func_wall_toggle' && Number(e.spawnflags) & 1);
+    !(e.classname === 'func_wall_toggle' && Number(e.spawnflags) & 1) &&
+    !(e.classname === 'func_rotating' && Number(e.spawnflags) & 64);
 
   const spawnEnt = ['info_player_terrorist', 'info_player_counterterrorist', 'info_player_start', 'info_player_teamspawn', 'info_player_deathmatch'].map((c) => entities.find((e) => e.classname === c)).find(Boolean);
   const teleports: Teleport[] = entities
@@ -200,9 +241,16 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
     return bs.length ? bs : null;
   };
 
+  const disps = readDisps();
+  const dispBrushes = [...disps.values()].filter((d) => d.solid).flatMap((d) =>
+    d.tris.flatMap(([a, b, c]) => {
+      const [p, q, r] = [d.pos[a], d.pos[b], d.pos[c]].map((v) => vec(v[0], v[1], v[2]));
+      return makeTriPrism(p, q, r) ?? [];
+    }),
+  );
   return {
-    brushes: [...modelBrushes(0, PLAYER_SOLID), ...entities.filter(solidEntity).flatMap((e) => modelOf(e, PLAYER_SOLID))],
-    ...readFaces(),
+    brushes: [...modelBrushes(0, PLAYER_SOLID), ...entities.filter(solidEntity).flatMap((e) => modelOf(e, PLAYER_SOLID)), ...dispBrushes],
+    ...readFaces(disps),
     props: readProps(),
     pak: (() => {
       const { ofs, len } = lump(L.PAKFILE);
@@ -233,6 +281,32 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
       return { color: [c.x, c.y, c.z].map((v) => v / 255), start: Number(f.fogstart) || 0, end: Number(f.fogend) || 10000, max: f.fogmaxdensity === undefined ? 1 : Number(f.fogmaxdensity) };
     })(),
   };
+
+  function readDisps() {
+    const out = new Map<number, Disp>();
+    const infos = records(L.DISPINFO, 176, (o) => ({ start: [f32(o), f32(o + 4), f32(o + 8)], first: i32(o + 12), power: i32(o + 20), contents: i32(o + 32), face: u16(o + 36) }));
+    if (!infos.length) return out;
+    const offsets = records(L.DISP_VERTS, 20, (o) => [f32(o) * f32(o + 12), f32(o + 4) * f32(o + 12), f32(o + 8) * f32(o + 12)]);
+    const verts = records(L.VERTEXES, 12, (o) => [f32(o), f32(o + 4), f32(o + 8)]);
+    const edges = records(L.EDGES, 4, (o) => [u16(o), u16(o + 2)]);
+    const surfedges = records(L.SURFEDGES, 4, i32);
+    const faces = records(L.FACES, 56, (o) => ({ plane: u16(o), firstedge: i32(o + 4), numedges: i16(o + 8) }));
+    for (const d of infos) {
+      const f = faces[d.face];
+      if (!f || f.numedges !== 4 || d.power < 1 || d.power > 4) continue;
+      const corners: number[][] = [];
+      for (let k = 0; k < 4; k++) {
+        const se = surfedges[f.firstedge + k], e = edges[Math.abs(se)], v = e && verts[se >= 0 ? e[0] : e[1]];
+        if (v) corners.push(v);
+      }
+      if (corners.length < 4) continue;
+      const side = (1 << d.power) + 1;
+      const { flat, pos } = dispGrid(corners, d.start, side, (i) => offsets[d.first + i] ?? [0, 0, 0]);
+      // Solid unless the material is see-through: on these maps that's smoke, cobwebs, waterfalls and coloured glass.
+      out.set(d.face, { flat, pos, tris: dispTriangles(side, flat, planes[f.plane]?.normal ?? vec(0, 0, 1)), solid: (d.contents & 1) !== 0 });
+    }
+    return out;
+  }
 
   // Static props live in the 'sprp' game lump. Entry size varies by version, so derive it from the lump length.
   function readProps(): StaticProp[] {
@@ -275,7 +349,7 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
     return [];
   }
 
-  function readFaces() {
+  function readFaces(disps: Map<number, Disp>) {
     const verts = records(L.VERTEXES, 12, (o) => [f32(o), f32(o + 4), f32(o + 8)]);
     const edges = records(L.EDGES, 4, (o) => [u16(o), u16(o + 2)]);
     const surfedges = records(L.SURFEDGES, 4, i32);
@@ -383,23 +457,30 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
       const f = faces[it.face];
       const pn = planes[f.plane]?.normal ?? vec(0, 0, 1);
       const { poly, rect: r } = it;
+      // v: where the vertex is. m: where it maps to textures and light, which for sculpted terrain is the flat base face.
+      const put = (v: number[], m: number[]) => {
+        bucket.pos.push(v[0] + it.offset.x, v[1] + it.offset.y, v[2] + it.offset.z);
+        bucket.col.push(...it.color);
+        bucket.uv.push((m[0] * ti.s[0] + m[1] * ti.s[1] + m[2] * ti.s[2] + ti.s[3]) / tw, (m[0] * ti.t[0] + m[1] * ti.t[1] + m[2] * ti.t[2] + ti.t[3]) / th);
+        if (r) {
+          // Luxel coordinates within the face, sampled at luxel centres so filtering stays inside the rectangle.
+          const s = Math.min(r.w - 1, Math.max(0, m[0] * ax.s[0] + m[1] * ax.s[1] + m[2] * ax.s[2] + ax.s[3] - lf.lmMins[0]));
+          const t = Math.min(r.h - 1, Math.max(0, m[0] * ax.t[0] + m[1] * ax.t[1] + m[2] * ax.t[2] + ax.t[3] - lf.lmMins[1]));
+          bucket.lm.push((r.x + s + 0.5) / W, (r.y + t + 0.5) / H);
+          const a = ((r.y + Math.floor(t)) * W + r.x + Math.floor(s)) * 4;
+          lums.push(0.2126 * decodeLight(atlas[a]) + 0.7152 * decodeLight(atlas[a + 1]) + 0.0722 * decodeLight(atlas[a + 2]));
+        } else bucket.lm.push(0.5 / W, 0.5 / H);
+      };
+      const sculpted = disps.get(it.face);
+      if (sculpted) {
+        for (const tri of sculpted.tris) for (const i of tri) put(sculpted.pos[i], sculpted.flat[i]);
+        continue;
+      }
       for (let k = 1; k + 1 < poly.length; k++) {
         const [a, b, d] = [poly[0], poly[k], poly[k + 1]];
         const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2], vx = d[0] - a[0], vy = d[1] - a[1], vz = d[2] - a[2];
         const facing = ((uy * vz - uz * vy) * pn.x + (uz * vx - ux * vz) * pn.y + (ux * vy - uy * vx) * pn.z);
-        for (const v of facing >= 0 ? [a, b, d] : [a, d, b]) {
-          bucket.pos.push(v[0] + it.offset.x, v[1] + it.offset.y, v[2] + it.offset.z);
-          bucket.col.push(...it.color);
-          bucket.uv.push((v[0] * ti.s[0] + v[1] * ti.s[1] + v[2] * ti.s[2] + ti.s[3]) / tw, (v[0] * ti.t[0] + v[1] * ti.t[1] + v[2] * ti.t[2] + ti.t[3]) / th);
-          if (r) {
-            // Luxel coordinates within the face, sampled at luxel centres so filtering stays inside the rectangle.
-            const s = Math.min(r.w - 1, Math.max(0, v[0] * ax.s[0] + v[1] * ax.s[1] + v[2] * ax.s[2] + ax.s[3] - lf.lmMins[0]));
-            const t = Math.min(r.h - 1, Math.max(0, v[0] * ax.t[0] + v[1] * ax.t[1] + v[2] * ax.t[2] + ax.t[3] - lf.lmMins[1]));
-            bucket.lm.push((r.x + s + 0.5) / W, (r.y + t + 0.5) / H);
-            const a = ((r.y + Math.floor(t)) * W + r.x + Math.floor(s)) * 4;
-            lums.push(0.2126 * decodeLight(atlas[a]) + 0.7152 * decodeLight(atlas[a + 1]) + 0.0722 * decodeLight(atlas[a + 2]));
-          } else bucket.lm.push(0.5 / W, 0.5 / H);
-        }
+        for (const v of facing >= 0 ? [a, b, d] : [a, d, b]) put(v, v);
       }
     }
     const groups: BspMap['mesh']['groups'] = [];

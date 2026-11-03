@@ -31,6 +31,8 @@ export function simTick(map: MapDef, grid: Grid, cur: Player, cmd: Cmd, dt: numb
   // Only brushes near the player: enough margin for this tick's travel plus step and ground checks.
   const near = around(grid, cur.pos, 256 + Math.hypot(cur.vel.x, cur.vel.y, cur.vel.z) * dt * 2);
   let p = step(cur, cmd, near, dt);
+  // A step that ends inside something is undone, rather than respawning someone who was fine a tick ago.
+  if (embedded(p.pos, p.ducked, near) && !embedded(cur.pos, cur.ducked, near)) p = { ...cur, vel: vec() };
   // trigger_hurt: a dose on contact, then every half second while touching; dead at 0 HP (negative damage heals).
   let { health, hurtWait } = state;
   const hurts = map.hurts.filter((h) => touching(p, h.brushes));
