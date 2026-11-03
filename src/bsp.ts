@@ -3,6 +3,7 @@
 import { Vec3, vec, add, dot, scale, angleVectors } from './math';
 import { makeBox, makeTriPrism, Brush, Plane } from './brush';
 import { readZip } from './pak';
+import { lzmaUnpack } from './lzma';
 
 // landmark: arrive at the same offset from dest as from the landmark, keeping angles and velocity.
 // keepAngles: landmark or the "preserve angles" flag; otherwise the view turns to the destination's yaw.
@@ -115,18 +116,59 @@ const parseVec = (s: string | undefined) => {
   return vec(x || 0, y || 0, z || 0);
 };
 
-export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
+// Unpacked lumps go after the original file and the directories are repointed, so every other offset stays valid.
+// The game lump directory itself is never compressed; the game lumps it lists are, one by one.
+function unpackLumps(buffer: ArrayBuffer, name: string): ArrayBuffer {
   const dv = new DataView(buffer);
+  const parts: { at: number; data: Uint8Array }[] = [];
+  const unpack = (at: number, label: string) => {
+    try {
+      parts.push({ at, data: lzmaUnpack(new Uint8Array(buffer, dv.getInt32(at, true))) });
+    } catch {
+      throw new Error(`${name}: compressed ${label} is corrupt`);
+    }
+  };
+  const flagged: number[] = [];
+  for (let i = 0; i < 64; i++) {
+    const at = 8 + i * 16, ofs = dv.getInt32(at, true), len = dv.getInt32(at + 4, true);
+    if (ofs < 0 || len < 4 || ofs + len > buffer.byteLength) continue;
+    if (dv.getUint32(ofs, true) === 0x414d5a4c) unpack(at, `lump ${i}`);
+    else if (i === L.GAME) {
+      for (let k = 0, count = dv.getInt32(ofs, true); k < count && 4 + k * 16 + 16 <= len; k++) {
+        const e = ofs + 4 + k * 16, gameOfs = dv.getInt32(e + 8, true);
+        if (!(dv.getUint16(e + 4, true) & 1) || !dv.getInt32(e + 12, true)) continue; // a compressed list ends with an empty entry
+        if (gameOfs < 0 || gameOfs >= buffer.byteLength) throw new Error(`${name}: game lump ${k} is out of bounds (corrupt file?)`);
+        unpack(e + 8, `game lump ${k}`);
+        flagged.push(e + 4);
+      }
+    }
+  }
+  if (!parts.length) return buffer;
+  const bytes = new Uint8Array(buffer.byteLength + parts.reduce((s, part) => s + part.data.length, 0));
+  bytes.set(new Uint8Array(buffer));
+  const out = new DataView(bytes.buffer);
+  let end = buffer.byteLength;
+  for (const { at, data } of parts) {
+    bytes.set(data, end);
+    out.setInt32(at, end, true);
+    out.setInt32(at + 4, data.length, true);
+    end += data.length;
+  }
+  for (const flags of flagged) out.setUint16(flags, out.getUint16(flags, true) & ~1, true);
+  return bytes.buffer;
+}
+
+export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
   if (buffer.byteLength < 1036 || String.fromCharCode(...new Uint8Array(buffer, 0, 4)) !== 'VBSP')
     throw new Error(`${name} is not a Source BSP map (CS2 maps are .vpk and aren't supported)`);
-  const version = dv.getInt32(4, true);
-  if (version < 20 || version > 21) throw new Error(`${name}: BSP version ${version} isn't supported (need 20–21, CS:S or CS:GO)`);
+  const version = new DataView(buffer).getInt32(4, true);
+  if (version < 19 || version > 21) throw new Error(`${name}: BSP version ${version} isn't supported (need 19–21, CS:S or CS:GO)`);
+  buffer = unpackLumps(buffer, name);
+  const dv = new DataView(buffer);
 
   const lump = (i: number) => {
     const ofs = dv.getInt32(8 + i * 16, true), len = dv.getInt32(8 + i * 16 + 4, true);
     if (ofs < 0 || len < 0 || ofs + len > buffer.byteLength) throw new Error(`${name}: lump ${i} is out of bounds (corrupt file?)`);
-    if (len >= 4 && String.fromCharCode(...new Uint8Array(buffer, ofs, 4)) === 'LZMA')
-      throw new Error(`${name}: this map uses compressed lumps, which aren't supported`);
     return { ofs, len };
   };
   const records = <T>(i: number, size: number, read: (o: number) => T): T[] => {
@@ -142,7 +184,8 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
   const sides = records(L.BRUSHSIDES, 8, (o) => u16(o));
   const rawBrushes = records(L.BRUSHES, 12, (o) => ({ first: i32(o), num: i32(o + 4), contents: i32(o + 8) }));
   const nodes = records(L.NODES, 32, (o) => [i32(o + 4), i32(o + 8)]);
-  const leafs = records(L.LEAFS, 32, (o) => ({ first: u16(o + 24), num: u16(o + 26) }));
+  // Leaf lump version 0 (BSP v19 and older compiles) carries 24 bytes of ambient light per leaf.
+  const leafs = records(L.LEAFS, dv.getInt32(8 + L.LEAFS * 16 + 8, true) === 0 ? 56 : 32, (o) => ({ first: u16(o + 24), num: u16(o + 26) }));
   const leafbrushes = records(L.LEAFBRUSHES, 2, (o) => u16(o));
   const models = records(L.MODELS, 48, (o) => ({ minZ: f32(o + 8), headnode: i32(o + 36), firstface: i32(o + 40), numfaces: i32(o + 44) }));
   if (!models.length) throw new Error(`${name}: no world model found`);
@@ -318,8 +361,7 @@ export function parseBsp(buffer: ArrayBuffer, name: string): BspMap {
       if (i32(e) !== 0x73707270) continue;
       let p = i32(e + 8);
       const end = p + i32(e + 12);
-      // Compressed game lumps (flag 1) aren't supported; the map still loads without props.
-      if (dv.getUint16(e + 4, true) & 1 || p < 0 || end > buffer.byteLength || end - p < 12) return [];
+      if (p < 0 || end > buffer.byteLength || end - p < 12) return [];
       const dict = i32(p);
       p += 4;
       const names: string[] = [];

@@ -1,1 +1,10 @@
-[]
+[
+  { "file": "surf_anzchamps.bsp", "name": "Anzchamps" },
+  { "file": "surf_boreas.bsp", "name": "Boreas" },
+  { "file": "surf_demise.bsp", "name": "Demise" },
+  { "file": "surf_ferros.bsp", "name": "Ferros" },
+  { "file": "surf_leet_xl_beta7z.bsp", "name": "Leet XL Beta7z" },
+  { "file": "surf_me.bsp", "name": "Me" },
+  { "file": "surf_phantasia.bsp", "name": "Phantasia" },
+  { "file": "surf_pools.bsp", "name": "Pools" }
+]

@@ -842,6 +842,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     // A permitted map from licensed-maps/: on the start list, and in the credits.
     addLicensedMap(m: { id: string; name: string; difficulty?: string; credit: string; source?: string }) {
       this.addMap({ id: m.id, name: m.name }, false, m.difficulty);
+      if (!m.credit) return;
       const line = document.createElement('p');
       line.className = 'note credits';
       if (m.source && /^https:\/\//.test(m.source)) {

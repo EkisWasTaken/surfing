@@ -8,7 +8,7 @@ export default defineConfig(({ command }) => ({
   base: './', // works from any folder, e.g. username.github.io/surfing/
   assetsInclude: ['**/*.bsp'],
   plugins: [
-    // licensed-maps/ ships publicly: no build without credit and proof for every map.
+    // licensed-maps/ ships publicly: no build unless every map has a manifest entry.
     {
       name: 'licensed-maps-check',
       buildStart() {

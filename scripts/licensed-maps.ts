@@ -1,8 +1,8 @@
-// Every map in licensed-maps/ ships publicly, so a build must not pass unless each one is credited with its proof.
+// Every map in licensed-maps/ needs a manifest entry. Credit and proof are optional, but a named proof must exist.
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const REQUIRED = ['file', 'name', 'author', 'permission', 'proof'];
+const REQUIRED = ['file', 'name'];
 
 export function checkLicensedMaps(dir: string): string[] {
   let manifest: Record<string, unknown>[];

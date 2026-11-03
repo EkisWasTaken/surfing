@@ -84,9 +84,51 @@ describe('parseBsp', () => {
     expect(m.pak).toBeInstanceOf(Map);
   });
 
-  it('rejects non-BSP and compressed files with a clear error', () => {
+  it('rejects non-BSP files and corrupt compressed lumps with a clear error', () => {
     expect(() => parseBsp(buildBsp({ entities, world: [floor], submodels: [], ident: 'NOPE' }), 'x')).toThrow(/not a Source BSP/);
-    expect(() => parseBsp(buildBsp({ entities, world: [floor], submodels: [], lzmaLump: true }), 'x')).toThrow(/compressed/);
+    expect(() => parseBsp(buildBsp({ entities, world: [floor], submodels: [], lzmaLump: true }), 'x')).toThrow(/compressed lump 1 is corrupt/);
+  });
+
+  it('reads BSP version 19, with its longer leaves', () => {
+    const v19 = parseBsp(buildBsp({ entities, world: [floor], submodels: [], v19: true }), 'v19');
+    const v21 = parseBsp(buildBsp({ entities, world: [floor], submodels: [] }), 'v21');
+    expect(v19.brushes.length).toBe(v21.brushes.length);
+    expect(v19.brushes.length).toBeGreaterThan(0);
+  });
+});
+
+describe('compressed lumps', () => {
+  // Made with Python's lzma module: the entities and an sprp v10 lump holding one prop.
+  const PACKED_ENTITIES = 'TFpNQTMAAAA0AAAAXQAAAQAAPYgARnQQ8XTb1Pub1HuT8INKr9CsmS4tlNBv1nkhtZ9Y1cHyJu2c9FFs2Yw3///LvhAA';
+  const PACKED_SPRP = 'TFpNQdgAAAA2AAAAXQAAAQAAAIA8ikLjhqTTzRrPpcBPRw4RVBhlpc9+9MQjdAG3Rtjr5LLG+y1L7kNV7zDqiWP//8WOAAA=';
+  const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+  // Appends data to the file and points a lump at it.
+  const withLump = (buf: ArrayBuffer, index: number, data: Uint8Array) => {
+    const out = new Uint8Array(buf.byteLength + data.length);
+    out.set(new Uint8Array(buf));
+    out.set(data, buf.byteLength);
+    const dv = new DataView(out.buffer);
+    dv.setInt32(8 + index * 16, buf.byteLength, true);
+    dv.setInt32(8 + index * 16 + 4, data.length, true);
+    return out.buffer;
+  };
+
+  it('reads a compressed lump', () => {
+    expect(parseBsp(withLump(file(), 0, unb64(PACKED_ENTITIES)), 'c').skyName).toBe('packed_sky');
+  });
+  it('reads compressed static props, past the empty entry that ends the list', () => {
+    const base = file(), packed = unb64(PACKED_SPRP);
+    const dir = new DataView(new ArrayBuffer(4 + 32));
+    dir.setInt32(0, 2, true);
+    dir.setInt32(4, 0x73707270, true);
+    dir.setUint16(8, 1, true);
+    dir.setUint16(10, 10, true);
+    dir.setInt32(12, base.byteLength + 36, true);
+    dir.setInt32(16, 216, true);
+    const all = new Uint8Array(36 + packed.length);
+    all.set(new Uint8Array(dir.buffer));
+    all.set(packed, 36);
+    expect(parseBsp(withLump(base, 35, all), 'c').props).toEqual([{ model: 'models/packed.mdl', origin: { x: 10, y: 20, z: 30 }, angles: { x: 0, y: 90, z: 0 }, skin: 2, scale: 1 }]);
   });
 });
 

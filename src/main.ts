@@ -40,7 +40,7 @@ if (!document.createElement('canvas').getContext('webgl2')) {
 }
 const licensedFiles = import.meta.glob('/licensed-maps/*.bsp', { query: '?url', import: 'default', eager: true }) as Record<string, string>;
 const licensedUrl = (file: string) => licensedFiles[`/licensed-maps/${file}`] as string | undefined;
-const licensed = licensedMaps as { file: string; name: string; author: string; permission: string; source?: string; difficulty?: string; finish?: number[] }[];
+const licensed = licensedMaps as { file: string; name: string; author?: string; permission?: string; source?: string; difficulty?: string; finish?: number[] }[];
 const canvas = document.querySelector<HTMLCanvasElement>('#game')!;
 const input = createInput(canvas);
 const renderer = createRenderer(canvas);
@@ -868,7 +868,7 @@ function loadClassic() {
 if (settings.game === 'cs16') loadClassic();
 // Maps used with permission (licensed-maps/), in every build.
 for (const m of licensed) {
-  hud.addLicensedMap({ id: `bsp:${m.file}`, name: m.name, difficulty: m.difficulty, source: m.source, credit: `by ${m.author}. ${m.permission}.` });
+  hud.addLicensedMap({ id: `bsp:${m.file}`, name: m.name, difficulty: m.difficulty, source: m.source, credit: [m.author && `by ${m.author}.`, m.permission && `${m.permission}.`].filter(Boolean).join(' ') });
 }
 if (wantedMap.startsWith('bsp:') && licensedUrl(wantedMap.slice(4))) loadFolderMap(wantedMap.slice(4));
 // The public build has none of these files, so it doesn't ask for them.

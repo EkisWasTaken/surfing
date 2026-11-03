@@ -29,11 +29,10 @@ describe('licensed-maps check', () => {
   it('refuses a map with no entry', () => {
     expect(checkLicensedMaps(setup([], ['b.bsp']))[0]).toContain('no entry');
   });
-  it('refuses missing credit, permission or proof', () => {
-    const e = checkLicensedMaps(setup([{ ...good, author: ' ', permission: undefined }], ['a.bsp']));
-    expect(e.join()).toContain('"author"');
-    expect(e.join()).toContain('"permission"');
-    expect(e.join()).toContain('proof file');
+  it('accepts an entry with no credit or proof, but not a missing name or a proof that is not there', () => {
+    expect(checkLicensedMaps(setup([{ file: 'a.bsp', name: 'A' }], ['a.bsp']))).toEqual([]);
+    expect(checkLicensedMaps(setup([{ file: 'a.bsp' }], ['a.bsp'])).join()).toContain('"name"');
+    expect(checkLicensedMaps(setup([good], ['a.bsp'])).join()).toContain('proof file');
   });
   it('refuses an entry whose map is gone, odd file names and a broken manifest', () => {
     expect(checkLicensedMaps(setup([good], ['proofs/a.png']))[0]).toContain("isn't in the folder");

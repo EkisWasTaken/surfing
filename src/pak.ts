@@ -1,7 +1,54 @@
-// Reads the zip "pakfile" embedded in a BSP (lump 40). Source packs entries uncompressed (method 0);
-// compressed entries are skipped. Input is untrusted: all reads are bounds-checked.
+import { lzmaUnpackZipEntry } from './lzma';
+
+const MAX_UNPACKED = 2 ** 31; // a small file can claim huge entries: stop unpacking past this, per zip
+
+// LZMA entries unpack the first time they're read: a map packs thousands of files, and unpacking them all froze the page for 20s.
+class Zip extends Map<string, Uint8Array> {
+  private packed = new Map<string, number>(); // name -> unpacked size, while the stored value is still compressed
+  private unpacked = 0;
+  addPacked(name: string, data: Uint8Array, fullSize: number) {
+    this.set(name, data);
+    this.packed.set(name, fullSize);
+  }
+  set(name: string, data: Uint8Array) {
+    this.packed?.delete(name);
+    return super.set(name, data);
+  }
+  get(name: string) {
+    const data = super.get(name), fullSize = this.packed.get(name);
+    if (!data || fullSize === undefined) return data;
+    this.packed.delete(name);
+    try {
+      if ((this.unpacked += fullSize) > MAX_UNPACKED) throw new Error('too much to unpack');
+      const full = lzmaUnpackZipEntry(data, fullSize);
+      super.set(name, full);
+      return full;
+    } catch {
+      this.delete(name); // one broken file shouldn't lose the map
+      return undefined;
+    }
+  }
+  *entries(): Generator<[string, Uint8Array], undefined> {
+    for (const name of [...this.keys()]) {
+      const data = this.get(name);
+      if (data) yield [name, data];
+    }
+  }
+  *values(): Generator<Uint8Array, undefined> {
+    for (const [, data] of this.entries()) yield data;
+  }
+  [Symbol.iterator]() {
+    return this.entries();
+  }
+  forEach(fn: (value: Uint8Array, key: string, map: Map<string, Uint8Array>) => void) {
+    for (const [name, data] of this.entries()) fn(data, name, this);
+  }
+}
+
+// Reads the zip "pakfile" embedded in a BSP (lump 40). Source packs entries stored (method 0) or with LZMA (method 14);
+// other methods and broken entries are skipped. Input is untrusted: all reads are bounds-checked.
 export function readZip(bytes: Uint8Array): Map<string, Uint8Array> {
-  const out = new Map<string, Uint8Array>();
+  const out = new Zip();
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   // End-of-central-directory record sits in the last 64 KB (after an optional comment).
   let eocd = -1;
@@ -18,14 +65,17 @@ export function readZip(bytes: Uint8Array): Map<string, Uint8Array> {
   for (let k = 0; k < count && p + 46 <= bytes.length; k++) {
     if (dv.getUint32(p, true) !== 0x02014b50) break;
     const method = dv.getUint16(p + 10, true);
-    const size = dv.getUint32(p + 20, true);
+    const size = dv.getUint32(p + 20, true), fullSize = dv.getUint32(p + 24, true);
     const nameLen = dv.getUint16(p + 28, true), extraLen = dv.getUint16(p + 30, true), commentLen = dv.getUint16(p + 32, true);
     const local = dv.getUint32(p + 42, true);
     const name = dec.decode(bytes.subarray(p + 46, p + 46 + nameLen)).toLowerCase().replace(/\\/g, '/');
     p += 46 + nameLen + extraLen + commentLen;
-    if (method !== 0 || local + 30 > bytes.length || dv.getUint32(local, true) !== 0x04034b50) continue;
+    if ((method !== 0 && method !== 14) || local + 30 > bytes.length || dv.getUint32(local, true) !== 0x04034b50) continue;
     const start = local + 30 + dv.getUint16(local + 26, true) + dv.getUint16(local + 28, true);
-    if (start + size <= bytes.length) out.set(name, bytes.subarray(start, start + size));
+    if (start + size > bytes.length) continue;
+    const data = bytes.subarray(start, start + size);
+    if (method === 0) out.set(name, data);
+    else out.addPacked(name, data, fullSize);
   }
   return out;
 }

@@ -23,7 +23,7 @@ Maps in this folder ship in the hosted game, so only add a map if its author has
 ]
 ```
 
-`file`, `name`, `author`, `permission` and `proof` are required. `source`, `difficulty` and `finish` are optional.
+`file` and `name` are required. `author`, `permission`, `proof`, `source`, `difficulty` and `finish` are optional, but fill in the credit and proof before a map goes public.
 
 ## Leaderboards
 
@@ -33,7 +33,7 @@ If a map doesn't, the game tells you when you load it. Stand at the finish, open
 
 Replacing a map file keeps its old times, so a changed course can leave records nobody can beat. To reset a board, delete that map's rows in the database.
 
-The build stops with an error if a map here has no complete entry, or an entry has no map or proof, so nothing goes out uncredited. The author and permission text are shown in the game's credits.
+The build stops with an error if a map here has no entry, or an entry names a map or proof that isn't here. It does not stop a map with no credit or proof. The author and permission text, when given, are shown in the game's credits.
 
 ## What to ask an author
 
