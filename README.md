@@ -35,7 +35,7 @@ The build leaves out `public/`, where imported Steam files live, so `dist` is al
 - **Stages:** longer maps come in stages. A fall returns you to the stage you're on, and the chat compares each stage with your best run.
 - **Medals:** gold, silver and bronze per built-in map (estimated targets for now).
 - **Race a friend:** Records tab, copy a code for your best run. A friend pastes it to race your orange ghost.
-- **Replay:** watch your best run from behind, from the Records tab.
+- **Replay:** watch your best run from behind, from the Leaderboard tab.
 - **Checkpoints:** 1 saves, 2 returns, 3 steps back through earlier ones (practice runs).
 
 ## Desktop app
@@ -63,7 +63,7 @@ Keep a backup of `updater.key` somewhere safe. Players' apps only accept updates
 
 ## Leaderboard
 
-Each map has a leaderboard for you and your friends, on the Records tab. Modern, Classic and 128-tick have separate boards, and only saved runs count. Without the setup below the game works the same, with no leaderboard.
+Each map has a leaderboard for you and your friends, on the Leaderboard tab, which lists every map with its leader and your place. Modern, Classic and 128-tick have separate boards, and only saved runs count. Without the setup below the game works the same, with no leaderboard.
 
 It runs on a small [Cloudflare Worker](worker/src/index.ts) with a D1 database. To set it up, from the `worker` folder:
 
@@ -92,7 +92,7 @@ It runs on a small [Cloudflare Worker](worker/src/index.ts) with a D1 database. 
    - For local builds, copy `.env.example` to `.env.local` and fill it in.
    - For the hosted game, add it as a repository variable named `VITE_LEADERBOARD_URL`.
 
-Players enter the group code on the Records tab, and their name on the Map tab is claimed for them. Names are unique. Each player gets a private recovery code, which brings their name and times to another PC. Anyone with it can post as them.
+Players enter the group code on the Leaderboard tab, and their name on the Map tab is claimed for them. Names are unique. Each player gets a private recovery code, which brings their name and times to another PC. Anyone with it can post as them.
 
 The game reports its own times, so the code keeps strangers out but can't stop someone in the group from faking one. To remove a time or a player, delete the row in the D1 console in Cloudflare's dashboard. Changing the group code locks everyone out until they enter the new one.
 
@@ -168,6 +168,19 @@ cl_showfps 1          FPS counter
 ```
 
 Commands chain with `;`, and quoted arguments work. A clear typo is corrected and run (`noclp` runs `noclip`).
+
+### Arms and knife position
+
+On the Display tab, or in the console:
+
+| Command | What it does |
+|---|---|
+| `viewmodel_fov` | Field of view of the arms and knife, 40 to 120 |
+| `viewmodel_offset_x` | Left or right, -8 to 8 |
+| `viewmodel_offset_y` | Back or forward, -8 to 8 |
+| `viewmodel_offset_z` | Down or up, -8 to 8 |
+| `cl_righthand` | 0 holds the knife in the left hand |
+| `viewmodel_reset` | Back to the defaults |
 
 ## Map finishes
 

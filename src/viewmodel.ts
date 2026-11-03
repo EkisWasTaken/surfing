@@ -1,6 +1,7 @@
 // First-person viewmodel layer: its own scene and camera, drawn over the world so it never clips into walls.
 // Holds CS2's own arms, knife and first-person animations (decoded by the import step from the local CS2 install).
 import * as THREE from 'three';
+import { VIEWMODEL_FOV } from './settings';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import type { Pose } from './viewmodelPose';
 import type { Cs2Mesh } from './cs2model';
@@ -12,8 +13,6 @@ import type { Mdl, MdlSequence } from './goldsrcmdl';
 import type { GameMode } from './config';
 
 const DEG = Math.PI / 180;
-// CS:GO viewmodel_fov default; CS 1.6 draws the viewmodel at fov 90. Horizontal at 4:3.
-const VIEWMODEL_FOV: Record<GameMode, number> = { csgo: 68, cs16: 90 };
 const INCH = 0.0254; // Source units → viewmodel metres
 
 type Track = { frames: number; duration: number; poses: Float32Array };
@@ -178,6 +177,7 @@ export function createViewmodel(renderer: THREE.WebGLRenderer) {
   cs2.add(hold);
   scene.add(rig);
   let game: GameMode = 'csgo';
+  let adjust = { fov: 0, x: 0, y: 0, z: 0, left: false };
   cs16.visible = false;
   let k16: ReturnType<typeof goldsrcRig> | null = null;
   const ownRigs: Partial<Record<GameMode, OwnRig>> = {};
@@ -198,7 +198,7 @@ export function createViewmodel(renderer: THREE.WebGLRenderer) {
   };
   const resize = (aspect: number) => {
     camera.aspect = aspect;
-    camera.fov = (2 * Math.atan(Math.tan((VIEWMODEL_FOV[game] * DEG) / 2) * 0.75)) / DEG;
+    camera.fov = (2 * Math.atan(Math.tan(((adjust.fov || VIEWMODEL_FOV[game]) * DEG) / 2) * 0.75)) / DEG;
     camera.updateProjectionMatrix();
   };
   const mount = () => knife && (arms?.bone('wpn') ?? hold).add(knife.root); // weapons ride the viewmodel skeleton's wpn bone
@@ -278,8 +278,14 @@ export function createViewmodel(renderer: THREE.WebGLRenderer) {
       anim = { clip, start: now };
     },
     resize,
+    // The player's own placement, in CS's terms: x to the right, y forward, z up.
+    setAdjust(a: typeof adjust) {
+      adjust = a;
+      rig.scale.x = a.left ? -1 : 1;
+      resize(camera.aspect);
+    },
     apply(p: Pose) {
-      rig.position.set(p.x - p.swayX, p.y - p.swayY, 0);
+      rig.position.set(p.x - p.swayX + adjust.x * INCH, p.y - p.swayY + adjust.z * INCH, -adjust.y * INCH);
       rig.rotation.set(p.swayY * 2, p.swayX * 2, 0);
       const o = own();
       for (const r of Object.values(ownRigs)) r.root.visible = r === o;

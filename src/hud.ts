@@ -1,4 +1,4 @@
-import type { Settings } from './settings';
+import { Settings, defaults, viewmodelFov, VM_FOV_MIN, VM_FOV_MAX, VM_OFFSET } from './settings';
 import { gameLabel } from './hosted';
 import { formatTime } from './timer';
 import { bindLabel, wheelCode } from './input';
@@ -13,6 +13,7 @@ type HudOptions = {
   onUpdate: () => void;
   onRealImport: () => void;
   onRealRemove: () => void;
+  boards: boolean; // this build has a leaderboard service
   onBoardOpen: (mapId?: string) => void;
   onGroupJoin: (code: string) => void;
   onCopyRecovery: () => void;
@@ -45,6 +46,7 @@ const TABS = [
   { id: 'display', name: 'Display' },
   { id: 'knife', name: 'Knife' },
   { id: 'records', name: 'Records' },
+  { id: 'board', name: 'Leaderboard' },
   { id: 'controls', name: 'Controls' },
 ];
 
@@ -98,7 +100,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
         <header class="titlebar"><h1 id="startTitle">Surf Sandbox</h1><span class="gameName"></span></header>
         <div class="mapCards">${opts.maps.filter((m) => m.theme).map((m) => {
             const [name, level] = m.name.split(/ \((.+)\)/);
-            return `<button type="button" class="button mapCard" data-map="${esc(m.id)}"><i style="background:linear-gradient(90deg,${m.theme!.zenith},${m.theme!.horizon})"></i><strong>${esc(name)}</strong><small>${esc(level ?? '')}</small><span class="cardBest"></span></button>`;
+            return `<button type="button" class="button mapCard" data-map="${esc(m.id)}"><i style="background:linear-gradient(90deg,${m.theme!.zenith},${m.theme!.horizon})"></i><strong>${esc(name)}</strong><small>${esc(level ?? '')}</small><span class="cardPlace"></span><span class="cardBest"></span></button>`;
           }).join('')}</div>
         <footer class="buttons">
           <button type="button" class="button startSettings">Options</button>
@@ -148,6 +150,23 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
             <label class="row check"><input name="showGhost" type="checkbox" /><span>Race a ghost of your best run</span></label>
             <label class="row check"><input name="showViewmodel" type="checkbox" /><span>Show arms and knife</span></label>
             <label class="row check"><input name="speedFx" type="checkbox" /><span>Widen the view at high speed</span></label>
+            <div class="vmBox">
+              <p class="recentTitle">Arms and knife position</p>
+              <label class="row"><span>Viewmodel FOV</span>
+                <span class="slider"><input name="vmFov" type="range" min="${VM_FOV_MIN}" max="${VM_FOV_MAX}" step="1" /><output name="vmFovOut"></output></span>
+              </label>
+              <label class="row"><span>Left / right</span>
+                <span class="slider"><input name="vmX" type="range" min="-${VM_OFFSET}" max="${VM_OFFSET}" step="0.25" /><output name="vmXOut"></output></span>
+              </label>
+              <label class="row"><span>Back / forward</span>
+                <span class="slider"><input name="vmY" type="range" min="-${VM_OFFSET}" max="${VM_OFFSET}" step="0.25" /><output name="vmYOut"></output></span>
+              </label>
+              <label class="row"><span>Down / up</span>
+                <span class="slider"><input name="vmZ" type="range" min="-${VM_OFFSET}" max="${VM_OFFSET}" step="0.25" /><output name="vmZOut"></output></span>
+              </label>
+              <label class="row check"><input name="vmLeft" type="checkbox" /><span>Hold the knife in the left hand</span></label>
+              <div class="shareRow"><button type="button" class="button vmReset">Reset position</button></div>
+            </div>
             <label class="row check"><input name="fullscreen" type="checkbox" /><span>Fullscreen while playing (holds the mouse in; hold Esc to leave)</span></label>
             <div class="realModels" hidden>
               <p class="recentTitle">Real CS models</p>
@@ -170,29 +189,6 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
             </div>
           </div>
           <div class="sheet" role="tabpanel" id="sheet-records" aria-labelledby="tab-records" hidden>
-            <div class="board" hidden>
-              <div class="boardHead">
-                <p class="boardTitle"></p>
-                <select class="boardMap" aria-label="Leaderboard map"></select>
-              </div>
-              <table class="keylist boardRows" hidden>
-                <thead><tr><th scope="col">#</th><th scope="col">Player</th><th scope="col">Time</th><th scope="col">Medal</th></tr></thead>
-                <tbody></tbody>
-              </table>
-              <p class="note boardNote" role="status"></p>
-              <div class="shareRow">
-                <input class="groupCode" type="text" placeholder="Group code" autocomplete="off" spellcheck="false" aria-label="Group code" />
-                <button type="button" class="button groupJoin">Join</button>
-              </div>
-              <div class="boardAccount" hidden>
-                <p class="note boardWho"></p>
-                <div class="shareRow">
-                  <button type="button" class="button copyRecovery">Copy my recovery code</button>
-                  <input class="recoveryInput" type="text" placeholder="Recovery code from another PC" autocomplete="off" spellcheck="false" aria-label="Recovery code from another PC" />
-                  <button type="button" class="button useRecovery">Use code</button>
-                </div>
-              </div>
-            </div>
             <p class="recordsTitle"></p>
             <p class="note noRecords">Finish a map to set your first record. Times are kept separately for ${gameLabel('csgo')} and ${gameLabel('cs16')}.</p>
             <table class="keylist records" hidden>
@@ -214,6 +210,35 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
             <div class="recent" hidden>
               <p class="recentTitle"></p>
               <ol class="recentList"></ol>
+            </div>
+          </div>
+          <div class="sheet" role="tabpanel" id="sheet-board" aria-labelledby="tab-board" hidden>
+            <div class="board" hidden>
+              <p class="boardTitle"></p>
+              <div class="boardList">
+                <table class="keylist boardMaps">
+                  <thead><tr><th scope="col">Map</th><th scope="col">1st place</th><th scope="col">Time</th><th scope="col">You</th></tr></thead>
+                  <tbody></tbody>
+                </table>
+              </div>
+              <p class="boardMapTitle"></p>
+              <table class="keylist boardRows" hidden>
+                <thead><tr><th scope="col">#</th><th scope="col">Player</th><th scope="col">Time</th><th scope="col">Medal</th></tr></thead>
+                <tbody></tbody>
+              </table>
+              <p class="note boardNote" role="status"></p>
+              <div class="shareRow">
+                <input class="groupCode" type="text" placeholder="Group code" autocomplete="off" spellcheck="false" aria-label="Group code" />
+                <button type="button" class="button groupJoin">Join</button>
+              </div>
+              <div class="boardAccount" hidden>
+                <p class="note boardWho"></p>
+                <div class="shareRow">
+                  <button type="button" class="button copyRecovery">Copy my recovery code</button>
+                  <input class="recoveryInput" type="text" placeholder="Recovery code from another PC" autocomplete="off" spellcheck="false" aria-label="Recovery code from another PC" />
+                  <button type="button" class="button useRecovery">Use code</button>
+                </div>
+              </div>
             </div>
           </div>
           <div class="sheet" role="tabpanel" id="sheet-controls" aria-labelledby="tab-controls" hidden>
@@ -266,7 +291,17 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   el.tickrate.value = String(cur.tickrate);
   el.game.value = cur.game;
   // The whole UI wears the chosen game's look: CS 1.6 VGUI or CS:GO.
+  const showViewmodelSettings = () => {
+    el.vmFov.value = String(viewmodelFov(cur));
+    el.vmFovOut.value = String(viewmodelFov(cur));
+    for (const k of ['vmX', 'vmY', 'vmZ'] as const) {
+      el[k].value = String(cur[k]);
+      el[`${k}Out`].value = cur[k].toFixed(2);
+    }
+    el.vmLeft.checked = cur.vmLeft;
+  };
   const showGame = () => {
+    showViewmodelSettings();
     root.dataset.game = cur.game;
     root.querySelectorAll('.gameName').forEach((e) => (e.textContent = gameLabel(cur.game)));
     el.tickrate.disabled = cur.game === 'cs16';
@@ -292,7 +327,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     try {
       localStorage.setItem('surf-menu-tab', id);
     } catch {}
-    if (id === 'records' && !overlay.hidden) opts.onBoardOpen();
+    if (id === 'board' && !overlay.hidden) opts.onBoardOpen();
   };
   tabButtons.forEach((b) => b.addEventListener('click', () => selectTab(b.dataset.tab!)));
   $('.tabs').addEventListener('keydown', (e) => {
@@ -304,7 +339,8 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   try {
     saved = localStorage.getItem('surf-menu-tab');
   } catch {}
-  selectTab(TABS.some((t) => t.id === saved) ? saved! : 'map');
+  $('#tab-board').hidden = !opts.boards;
+  selectTab(TABS.some((t) => t.id === saved && (t.id !== 'board' || opts.boards)) ? saved! : 'map');
   showGame();
   el.autobhop.checked = cur.autobhop;
   el.showSpeed.checked = cur.showSpeed;
@@ -345,6 +381,11 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       map: el.map.value,
       sensitivity: Number.isFinite(sens) ? Math.min(20, Math.max(0.01, sens)) : cur.sensitivity,
       fov: Number(el.fov.value),
+      vmFov: e.target === el.vmFov ? Number(el.vmFov.value) : cur.vmFov, // otherwise it follows the game's default
+      vmX: Number(el.vmX.value),
+      vmY: Number(el.vmY.value),
+      vmZ: Number(el.vmZ.value),
+      vmLeft: el.vmLeft.checked,
       tickrate: el.tickrate.value === '128' ? 128 : 64,
       game: el.game.value === 'cs16' ? 'cs16' : 'csgo',
       autobhop: el.autobhop.checked,
@@ -386,7 +427,12 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
   }
   // Start screen: the map list drives the same setting as the menu's map picker.
   const start = $('.start'), cards = [...root.querySelectorAll<HTMLButtonElement>('.mapCard')];
-  const markCard = () => cards.forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.map === el.map.value)));
+  const markCard = () =>
+    cards.forEach((c) => {
+      const on = c.dataset.map === el.map.value;
+      c.setAttribute('aria-pressed', String(on));
+      if (on && !start.hidden) c.scrollIntoView({ block: 'nearest' }); // the list can be long: keep the picked map in view
+    });
   const pickCard = (c: HTMLButtonElement) => {
     el.map.value = c.dataset.map!;
     el.map.dispatchEvent(new Event('input', { bubbles: true }));
@@ -403,15 +449,15 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     optionsFromStart = true;
     start.hidden = true;
     overlay.hidden = false;
-    if (tab === 'records') opts.onBoardOpen();
+    if (tab === 'board') opts.onBoardOpen();
   });
   const finishPanel = $('.finishPanel');
-  const boardMap = $<HTMLSelectElement>('.boardMap'), groupCode = $<HTMLInputElement>('.groupCode');
+  const groupCode = $<HTMLInputElement>('.groupCode');
+  $('.vmReset').addEventListener('click', () => change({ vmFov: defaults.vmFov, vmX: defaults.vmX, vmY: defaults.vmY, vmZ: defaults.vmZ, vmLeft: defaults.vmLeft }));
   groupCode.value = cur.groupCode;
   const recoveryInput = $<HTMLInputElement>('.recoveryInput');
   $('.copyRecovery').addEventListener('click', opts.onCopyRecovery);
   $('.useRecovery').addEventListener('click', () => opts.onUseRecovery(recoveryInput.value));
-  boardMap.addEventListener('change', () => opts.onBoardOpen(boardMap.value));
   $('.groupJoin').addEventListener('click', () => opts.onGroupJoin(groupCode.value));
   groupCode.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
@@ -668,12 +714,34 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       speedVal.textContent = String(Math.round(u));
       speedVal.dataset.tier = u >= 3000 ? '3' : u >= 2000 ? '2' : u >= 1000 ? '1' : '';
     },
-    // One map's leaderboard. rows stay out of the way (empty) while note says what's going on.
-    setBoard(b: { title: string; maps: { id: string; name: string }[]; map: string; rows: { place: number; name: string; time: number; mine: boolean; medal: string | null }[]; note: string }) {
+    // Your place on each map, on the start screen.
+    setCardPlaces(places: Map<string, string>) {
+      for (const c of cards) c.querySelector('.cardPlace')!.textContent = places.get(c.dataset.map!) ?? '';
+    },
+    // Every map at a glance, and the picked map's top 10. rows stay out of the way (empty) while note says what's going on.
+    setBoard(b: { title: string; map: string; mapName: string; overview: { id: string; name: string; leader: string | null; time: number | null; place: number | null; myTime: number | null }[]; rows: { place: number; name: string; time: number; mine: boolean; medal: string | null }[]; note: string }) {
       $('.board').hidden = false;
       $('.boardTitle').textContent = b.title;
-      if (boardMap.options.length !== b.maps.length) boardMap.replaceChildren(...b.maps.map((m) => new Option(m.name, m.id)));
-      boardMap.value = b.map;
+      const list = $('.boardList');
+      const scroll = list.scrollTop;
+      $('.boardMaps tbody').replaceChildren(
+        ...b.overview.map((m) => {
+          const tr = document.createElement('tr');
+          if (m.id === b.map) tr.className = 'current';
+          const pick = document.createElement('button');
+          pick.type = 'button';
+          pick.className = 'boardPick';
+          pick.textContent = m.name;
+          pick.addEventListener('click', () => opts.onBoardOpen(m.id));
+          tr.insertCell().append(pick);
+          tr.insertCell().textContent = m.leader ?? 'No times yet';
+          tr.insertCell().textContent = m.time === null ? '' : formatTime(m.time);
+          tr.insertCell().textContent = m.place === null ? '' : `#${m.place}  ${formatTime(m.myTime!)}`;
+          return tr;
+        }),
+      );
+      list.scrollTop = scroll;
+      $('.boardMapTitle').textContent = b.rows.length ? `${b.mapName}: top 10` : b.mapName;
       $('.boardNote').textContent = b.note;
       const table = $('.boardRows');
       table.hidden = b.rows.length === 0;
@@ -709,7 +777,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     setShareNote: (msg: string) => ($('.shareNote').textContent = msg),
     showOverlay(show: boolean) {
       overlay.hidden = !show;
-      if (show && tab === 'records') opts.onBoardOpen();
+      if (show && tab === 'board') opts.onBoardOpen();
     },
     startOpen: () => !start.hidden,
     showStart(show: boolean) {
@@ -767,18 +835,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
     },
     // A permitted map from licensed-maps/: on the start list, and in the credits.
     addLicensedMap(m: { id: string; name: string; difficulty?: string; credit: string; source?: string }) {
-      this.addMap({ id: m.id, name: m.name }, false);
-      const card = document.createElement('button');
-      card.type = 'button';
-      card.className = 'button mapCard';
-      card.dataset.map = m.id;
-      card.innerHTML = '<i></i><strong></strong><small></small><span class="cardBest"></span>';
-      card.querySelector('strong')!.textContent = m.name;
-      card.querySelector('small')!.textContent = m.difficulty ?? '';
-      card.addEventListener('click', () => pickCard(card));
-      $('.mapCards').append(card);
-      cards.push(card);
-      markCard();
+      this.addMap({ id: m.id, name: m.name }, false, m.difficulty);
       const line = document.createElement('p');
       line.className = 'note credits';
       if (m.source && /^https:\/\//.test(m.source)) {
@@ -788,8 +845,21 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       } else line.textContent = `${m.name} ${m.credit}`;
       root.querySelector('.credits')!.after(line);
     },
-    addMap(m: { id: string; name: string }, select = true) {
+    addMap(m: { id: string; name: string }, select = true, difficulty = '') {
       if (![...el.map.options].some((o) => o.value === m.id)) el.map.add(new Option(m.name, m.id));
+      if (!cards.some((c) => c.dataset.map === m.id)) {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'button mapCard';
+        card.dataset.map = m.id;
+        card.innerHTML = '<i></i><strong></strong><small></small><span class="cardPlace"></span><span class="cardBest"></span>';
+        card.querySelector('strong')!.textContent = m.name.replace(/^(CS:GO|Imported): /, '');
+        card.querySelector('small')!.textContent = difficulty;
+        card.addEventListener('click', () => pickCard(card));
+        $('.mapCards').append(card);
+        cards.push(card);
+        markCard();
+      }
       if (!select) return;
       el.map.value = m.id;
       cur = { ...cur, map: m.id };

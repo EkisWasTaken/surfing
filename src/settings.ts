@@ -1,11 +1,17 @@
 import { config, setGameMode, GameMode } from './config';
 
 export type KeyBinds = { forward: string; back: string; left: string; right: string; walk: string; duck: string };
-export type Settings = { name: string; game: GameMode; sensitivity: number; rawInput: boolean; fov: number; tickrate: 64 | 128; autobhop: boolean; showSpeed: boolean; map: string; jumpBind: string; showGhost: boolean; showViewmodel: boolean; speedFx: boolean; fullscreen: boolean; hudScale: number; groupCode: string; keys: KeyBinds; knife: string; finish: string; wear: number; seed: number };
+export type Settings = { name: string; game: GameMode; sensitivity: number; rawInput: boolean; fov: number; tickrate: 64 | 128; autobhop: boolean; showSpeed: boolean; map: string; jumpBind: string; showGhost: boolean; showViewmodel: boolean; speedFx: boolean; vmFov: number; vmX: number; vmY: number; vmZ: number; vmLeft: boolean; fullscreen: boolean; hudScale: number; groupCode: string; keys: KeyBinds; knife: string; finish: string; wear: number; seed: number };
 
-export const defaults: Settings = { name: 'Player', game: 'csgo', sensitivity: 2, rawInput: true, fov: 90, tickrate: 64, autobhop: true, showSpeed: true, map: 'warmup', jumpBind: 'Space', showGhost: true, showViewmodel: true, speedFx: true, fullscreen: true, hudScale: 1, groupCode: '', keys: { forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD', walk: 'ShiftLeft', duck: 'KeyC' }, knife: 'knife_default_ct', finish: '', wear: 0.01, seed: 0 };
+export const defaults: Settings = { name: 'Player', game: 'csgo', sensitivity: 2, rawInput: true, fov: 90, tickrate: 64, autobhop: true, showSpeed: true, map: 'warmup', jumpBind: 'Space', showGhost: true, showViewmodel: true, speedFx: true, vmFov: 0, vmX: 0, vmY: 0, vmZ: 0, vmLeft: false, fullscreen: true, hudScale: 1, groupCode: '', keys: { forward: 'KeyW', back: 'KeyS', left: 'KeyA', right: 'KeyD', walk: 'ShiftLeft', duck: 'KeyC' }, knife: 'knife_default_ct', finish: '', wear: 0.01, seed: 0 };
 
 const KEY = 'surf-settings';
+
+// CS:GO viewmodel_fov default; CS 1.6 draws the viewmodel at fov 90. Horizontal at 4:3.
+export const VIEWMODEL_FOV: Record<GameMode, number> = { csgo: 68, cs16: 90 };
+export const VM_FOV_MIN = 40, VM_FOV_MAX = 120, VM_OFFSET = 8;
+// vmFov 0: the game's own default, which changes with the game.
+export const viewmodelFov = (s: Pick<Settings, 'vmFov' | 'game'>) => s.vmFov || VIEWMODEL_FOV[s.game];
 const num = (v: unknown, min: number, max: number, fallback: number) =>
   typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, v)) : fallback;
 const bool = (v: unknown, fallback: boolean) => (typeof v === 'boolean' ? v : fallback);
@@ -31,6 +37,11 @@ export function parseSettings(raw: string | null): Settings {
     showGhost: bool(o.showGhost, defaults.showGhost),
     showViewmodel: bool(o.showViewmodel, defaults.showViewmodel),
     speedFx: bool(o.speedFx, defaults.speedFx),
+    vmFov: o.vmFov === 0 ? 0 : num(o.vmFov, VM_FOV_MIN, VM_FOV_MAX, defaults.vmFov),
+    vmX: num(o.vmX, -VM_OFFSET, VM_OFFSET, defaults.vmX),
+    vmY: num(o.vmY, -VM_OFFSET, VM_OFFSET, defaults.vmY),
+    vmZ: num(o.vmZ, -VM_OFFSET, VM_OFFSET, defaults.vmZ),
+    vmLeft: bool(o.vmLeft, defaults.vmLeft),
     rawInput: bool(o.rawInput, defaults.rawInput),
     fullscreen: bool(o.fullscreen, defaults.fullscreen),
     hudScale: num(o.hudScale, 0.7, 1.6, defaults.hudScale),

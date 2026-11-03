@@ -16,7 +16,7 @@ import type { VtexJson } from './cs2model';
 import { unb64 } from './b64';
 import licensedMaps from '../licensed-maps/manifest.json';
 import type { Track } from './records';
-import { createLeaderboard, loadAccount, saveAccount, WRONG_CODE, NAME_TAKEN, BAD_TOKEN } from './leaderboard';
+import { createLeaderboard, loadAccount, saveAccount, BoardRow, WRONG_CODE, NAME_TAKEN, BAD_TOKEN } from './leaderboard';
 import { createGrid } from './grid';
 import { newPlayer, unstick, Player } from './movement';
 import { simTick, touching, newTickState } from './sim';
@@ -29,7 +29,7 @@ import { newRun, tickRun, formatTime, Run } from './timer';
 import { loadRecords, saveRecords, recordFinish, recordKey, recordTrack, finishKind, FinishResult } from './records';
 import { ghostFromTicks, sampleGhost, ghostSeconds, loadGhost, saveGhost, encodeShare, decodeShare, Ghost, Shared } from './ghost';
 import { createConsole, keyName, Print } from './console';
-import { Settings, loadSettings, saveSettings, applySettings, defaults } from './settings';
+import { Settings, loadSettings, saveSettings, applySettings, defaults, viewmodelFov, VIEWMODEL_FOV, VM_FOV_MIN, VM_FOV_MAX, VM_OFFSET } from './settings';
 
 // three.js needs WebGL 2. Without it the game can't start, so say so rather than leave a blank page.
 if (!document.createElement('canvas').getContext('webgl2')) {
@@ -59,7 +59,7 @@ let records = loadRecords();
 let ghost: Ghost | null = null; // your best run on this map in this game
 let recording: number[] = []; // x, y, z, yaw per tick of the current run
 let practice = false; // a checkpoint teleport this run: it can't be a record
-let boardMap = ''; // the map picked on the Records tab; empty follows the map you're on
+let boardMap = ''; // the map picked on the Leaderboard tab; empty follows the map you're on
 let maxSpeed = 0;
 let typing = false; // chat or console input open
 let noclip = false; // console noclip: fly through walls (practice)
@@ -107,6 +107,7 @@ const tauri = (window as unknown as { __TAURI__?: { core: { invoke(cmd: string):
 const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
   maps,
   settings,
+  boards: !!import.meta.env.VITE_LEADERBOARD_URL,
   onPlay: input.requestLock,
   onCloseMenu: () => closeMenu(),
   onRealImport: () => importRealModels(),
@@ -126,6 +127,7 @@ const hud = createHud(document.querySelector<HTMLElement>('#hud')!, {
     applySettings(next);
     saveSettings(next);
     renderer.setShowViewmodel(next.showViewmodel);
+    applyViewmodel(next);
     input.setJumpBind(next.jumpBind);
     input.setFullscreen(next.fullscreen);
     input.setRawInput(next.rawInput);
@@ -279,8 +281,10 @@ function runCommand(name: string, args: string[]) {
 const board = createLeaderboard(import.meta.env.VITE_LEADERBOARD_URL);
 let account = loadAccount();
 const forgetAccount = () => (saveAccount((account = null)), hud.setBoardAccount(settings.groupCode ? '' : null));
-// Only maps every friend has: not local or dropped-in ones.
-const onBoards = (id: string) => builtins.some((m) => m.id === id) || (id.startsWith('bsp:') && licensedUrl(id.slice(4)) !== undefined);
+// Built-in and licensed maps, and Steam maps, which friends with the same map share. Not dropped-in files.
+// shortcut: Steam maps are matched by file name, so two versions under one name share a board; compare file hashes if that ever bites.
+const folderMaps = new Set<string>();
+const onBoards = (id: string) => builtins.some((m) => m.id === id) || (id.startsWith('bsp:') && (licensedUrl(id.slice(4)) !== undefined || folderMaps.has(id)));
 const NEEDS_NAME = 'needs a name';
 const accountTrouble = (e: unknown) =>
   e instanceof Error && e.message === NAME_TAKEN ? `The name "${player()}" is taken. Change your name on the Map tab, then press Join.`
@@ -308,26 +312,61 @@ async function syncName(code: string) {
     return e instanceof Error && e.message === NAME_TAKEN ? `The name "${player()}" is taken, so you're still "${name}" on the boards.` : null;
   }
 }
+const BOARD_FRESH = 30000;
+let boards: { track: string; at: number; rows: Map<string, BoardRow[]> } = { track: '', at: 0, rows: new Map() };
+const boardList = () => hud.mapList().filter((m) => onBoards(m.id)).map((m) => ({ id: m.id, name: m.name.replace(/^(CS:GO|Imported): /, '').replace(/ \(.+\)$/, '') }));
+async function loadBoards(code: string) {
+  const track = runTrack(), list = boardList();
+  if (boards.track === track && Date.now() - boards.at < BOARD_FRESH && list.every((m) => boards.rows.has(m.id))) return;
+  const rows = new Map<string, BoardRow[]>();
+  // shortcut: one request per map, six at a time; a combined Worker route would be lighter if map lists or groups grow a lot.
+  for (let i = 0; i < list.length; i += 6) await Promise.all(list.slice(i, i + 6).map(async (m) => rows.set(m.id, await board!.top(code, account?.token ?? null, track, m.id))));
+  boards = { track, at: Date.now(), rows };
+  paintPlaces();
+}
+function paintPlaces() {
+  const places = new Map<string, string>();
+  if (boards.track === runTrack()) for (const [id, rows] of boards.rows) {
+    const me = rows.find((r) => r.mine);
+    if (me) places.set(id, `#${me.place} of ${me.players}`);
+  }
+  hud.setCardPlaces(places);
+}
 let boardAsked = 0;
 async function showBoard(mapId = boardMap) {
   if (!board) return;
-  const list = hud.mapList().filter((m) => onBoards(m.id));
-  boardMap = onBoards(mapId) ? mapId : onBoards(map.id) ? map.id : list[0].id;
+  const list = boardList(), has = (id: string) => list.some((m) => m.id === id);
+  boardMap = has(mapId) ? mapId : has(map.id) ? map.id : list[0].id;
   const shown = boardMap, track = runTrack(), asked = ++boardAsked, def = builtins.find((m) => m.id === shown);
-  const put = (rows: { place: number; name: string; time: number; mine: boolean; medal: string | null }[], note: string) =>
-    hud.setBoard({ title: `Leaderboard: ${gameName()}${track === 'csgo128' ? ' 128-tick' : ''}`, maps: list, map: shown, rows, note });
-  if (!settings.groupCode) return hud.setBoardAccount(null), put([], "Enter your group's code to see each other's times.");
+  const mapName = list.find((m) => m.id === shown)!.name;
+  const put = (note: string) => {
+    const rowsOf = (id: string) => (boards.track === track ? boards.rows.get(id) : undefined) ?? [];
+    hud.setBoard({
+      title: `Leaderboard: ${gameName()}${track === 'csgo128' ? ' 128-tick' : ''}`,
+      map: shown,
+      mapName,
+      overview: list.map((m) => {
+        const rows = rowsOf(m.id), me = rows.find((r) => r.mine);
+        return { ...m, leader: rows[0]?.name ?? null, time: rows[0]?.time ?? null, place: me?.place ?? null, myTime: me?.time ?? null };
+      }),
+      rows: rowsOf(shown).map((r) => ({ ...r, medal: def ? medalFor(def, r.time) : null })),
+      note,
+    });
+  };
+  if (!settings.groupCode) return hud.setBoardAccount(null), put("Enter your group's code to see each other's times.");
   hud.setBoardAccount(account?.name ?? '');
-  put([], 'Loading…');
+  put(boards.track === track && boards.rows.size ? '' : 'Loading…');
   try {
-    const nameTrouble = await syncName(settings.groupCode);
+    const before = account?.name, nameTrouble = await syncName(settings.groupCode);
+    if (account?.name !== before) boards.at = 0;
     hud.setBoardAccount(account?.name ?? '');
-    const rows = await board.top(settings.groupCode, account?.token ?? null, track, shown);
-    const open = maps.find((m) => m.id === shown);
-    if (asked === boardAsked) put(rows.map((r) => ({ ...r, medal: def ? medalFor(def, r.time) : null })), nameTrouble ?? (rows.length ? '' : open && !sharedFinish(open) ? "This map has no finish everyone shares, so its times stay on each player's PC." : 'No times on this map yet.'));
+    await loadBoards(settings.groupCode);
+    if (asked !== boardAsked) return;
+    const open = maps.find((m) => m.id === shown), empty = !boards.rows.get(shown)?.length;
+    put(nameTrouble ?? (!empty ? '' : open && !sharedFinish(open) ? "This map has no finish everyone shares, so its times stay on each player's PC." : 'No times on this map yet.'));
   } catch (e) {
     if (asked !== boardAsked) return;
-    put([], e instanceof Error && e.message === WRONG_CODE ? "That group code doesn't work any more. Ask for the new one." : "The leaderboard can't be reached right now. Your times still save here.");
+    put(e instanceof Error && e.message === WRONG_CODE ? "That group code doesn't work any more. Ask for the new one." : "The leaderboard can't be reached right now. Your times still save here.");
   }
 }
 // Sends every best on this PC, so runs from before joining, or while offline, reach the boards too.
@@ -405,9 +444,10 @@ async function postBest(best: number, time: number) {
     await board.submit(code, token, track, id, best);
     const mine = (await board.top(code, token, track, id)).find((r) => r.mine);
     if (mine) say(`Leaderboard: #${mine.place} of ${mine.players}`);
+    boards.at = 0; // the overview is out of date now
   } catch (e) {
     if (e instanceof Error && e.message === BAD_TOKEN) forgetAccount();
-    say(accountTrouble(e) ? 'Not on the leaderboard yet: check your name on the Map tab, then press Join on the Records tab.' : "Leaderboard not reached: it'll be sent next time.");
+    say(accountTrouble(e) ? 'Not on the leaderboard yet: check your name on the Map tab, then press Join on the Leaderboard tab.' : "Leaderboard not reached: it'll be sent next time.");
   }
 }
 
@@ -520,6 +560,11 @@ con.cvar('cl_showfps', 'Show FPS (0/1)', { get: () => (showFps ? '1' : '0'), def
 con.cvar('m_rawinput', 'Raw mouse input (0/1)', { get: () => (settings.rawInput ? '1' : '0'), def: () => '1', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void hud.apply({ rawInput: bool(v)! })) });
 con.cvar('cl_showspeed', 'Show speed (0/1)', { get: () => (settings.showSpeed ? '1' : '0'), def: () => '1', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void hud.apply({ showSpeed: bool(v)! })) });
 con.cvar('r_drawviewmodel', 'Show arms and knife (0/1)', { get: () => (settings.showViewmodel ? '1' : '0'), def: () => '1', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void hud.apply({ showViewmodel: bool(v)! })) });
+con.cvar('viewmodel_fov', 'Arms and knife field of view', { get: () => String(viewmodelFov(settings)), def: () => String(VIEWMODEL_FOV[settings.game]), set: num(VM_FOV_MIN, VM_FOV_MAX, (n) => hud.apply({ vmFov: n })) });
+for (const [name, help, key] of [['viewmodel_offset_x', 'Arms and knife left/right', 'vmX'], ['viewmodel_offset_y', 'Arms and knife back/forward', 'vmY'], ['viewmodel_offset_z', 'Arms and knife down/up', 'vmZ']] as const)
+  con.cvar(name, help, { get: () => String(settings[key]), def: () => '0', set: num(-VM_OFFSET, VM_OFFSET, (n) => hud.apply({ [key]: n })) });
+con.cvar('cl_righthand', 'Knife in the right hand (0/1)', { get: () => (settings.vmLeft ? '0' : '1'), def: () => '1', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void hud.apply({ vmLeft: !bool(v) })) });
+con.command('viewmodel_reset', 'Put the arms and knife back', () => hud.apply({ vmFov: defaults.vmFov, vmX: defaults.vmX, vmY: defaults.vmY, vmZ: defaults.vmZ, vmLeft: defaults.vmLeft }));
 con.cvar('cl_ghost', 'Ghost of your best (0/1)', { get: () => (settings.showGhost ? '1' : '0'), def: () => '1', set: (v) => (bool(v) === null ? 'expects 0 or 1' : void hud.apply({ showGhost: bool(v)! })) });
 
 // Binds: CS key names → console commands, kept in this browser. "+jump" sets the jump key instead.
@@ -585,6 +630,9 @@ function setGoal(print: Print) {
 }
 const surfLine: Print = (text, tone) => surf({ text, tone: tone === 'error' ? 'bad' : undefined });
 
+function applyViewmodel(s: Settings) {
+  renderer.setViewmodelAdjust({ fov: s.vmFov, x: s.vmX, y: s.vmY, z: s.vmZ, left: s.vmLeft });
+}
 function refreshRecords() {
   const prefix = `${runTrack()}:`;
   const rows = Object.entries(records)
@@ -727,6 +775,7 @@ function applyFinish() {
 // CS 1.6's knife and hands (v_knife.mdl from your Counter-Strike install, copied by the import).
 renderer.setGame(settings.game);
 renderer.setShowViewmodel(settings.showViewmodel);
+applyViewmodel(settings);
 const gltf = new GLTFLoader();
 // The game's own knives, each loaded when picked (its file carries the arms too).
 const OWN_KNIVES = [{ id: 'knife_karambit', name: 'Karambit', url: karambitModel }, { id: 'knife_m9', name: 'M9 Bayonet', url: m9Model }];
@@ -789,7 +838,12 @@ json('/cs2/finishes/index.json')
 fetch(assetUrl('/maps/index.json'))
   .then((r) => (r.ok ? r.json() : []))
   .then((files: string[]) => {
-    for (const f of files) hud.addMap({ id: `bsp:${f}`, name: `CS:GO: ${f.replace(/\.bsp$/i, '')}` }, false);
+    for (const f of files) {
+      folderMaps.add(`bsp:${f}`);
+      hud.addMap({ id: `bsp:${f}`, name: `CS:GO: ${f.replace(/\.bsp$/i, '')}` }, false);
+    }
+    refreshRecords();
+    startBoards();
     if (wantedMap.startsWith('bsp:') && files.includes(wantedMap.slice(4))) loadFolderMap(wantedMap.slice(4));
   })
   .catch(() => {}); // no dev server endpoint: built-in maps and file loading still work
@@ -849,7 +903,13 @@ if (DESKTOP) {
     .catch(() => {});
 }
 
-syncBoards();
+// Sends this PC's bests up, then fetches the boards for the start screen.
+function startBoards() {
+  if (!board || !settings.groupCode) return;
+  const code = settings.groupCode;
+  syncBoards().then(() => loadBoards(code)).catch(() => {}); // offline: the start screen just shows no places
+}
+if (OWN_MODELS) startBoards(); // otherwise once the list of Steam maps has arrived
 input.onLockRefused(() => !menuClosed && hud.flash('Your browser needs a moment. Click Play again.'));
 input.setKeys(settings.keys);
 input.setFullscreen(settings.fullscreen);

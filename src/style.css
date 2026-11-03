@@ -229,7 +229,7 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #2a2f25; }
 /* ---------- Start screen: the menu window, listing the maps ---------- */
 .start { position: absolute; inset: 0; z-index: 1; display: flex; justify-content: center; align-items: center; padding: 16px; overflow-y: auto; pointer-events: auto; background: rgb(14 17 12 / 0.55); }
 .start[hidden] { display: none; }
-.startBox { width: min(520px, 100%); }
+.startBox { width: min(680px, 100%); }
 .mapCards { display: flex; flex-direction: column; gap: 4px; margin: 0 12px; padding: 8px; background: var(--well); border: 1px solid; border-color: var(--dark) var(--light) var(--light) var(--dark); }
 .mapCard { display: grid; grid-template-columns: 26px 1fr auto 76px; align-items: center; gap: 10px; width: 100%; text-align: left; }
 .mapCard i { height: 14px; border: 1px solid var(--dark); }
@@ -251,7 +251,22 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #2a2f25; }
 .finishBoard { margin: 4px 0 0; font-size: 14px; font-weight: 700; }
 .finishBoard:empty { display: none; }
 .boardHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.boardTitle { white-space: nowrap; }
+.boardTitle { white-space: nowrap; margin-bottom: 4px; }
+.overlay .window { width: min(680px, 100%); }
+.boardList { max-height: 210px; overflow-y: auto; border: 1px solid; border-color: var(--dark) var(--light) var(--light) var(--dark); }
+.boardList .keylist { border: 0; }
+.boardMaps th { position: sticky; top: 0; }
+.boardMaps td { padding: 0 8px; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--dim); }
+.boardMaps td:first-child { width: 42%; padding: 0; }
+.boardMaps td:last-child { width: auto; }
+.boardMaps tr.current td { background: color-mix(in srgb, var(--well) 70%, var(--select)); color: var(--text); }
+.boardPick { width: 100%; padding: 4px 8px; font: inherit; color: var(--text); text-align: left; background: none; border: 0; cursor: pointer; }
+.boardPick:hover { text-decoration: underline; }
+.boardPick:focus-visible { outline: 1px dotted var(--text); outline-offset: -2px; }
+.boardMapTitle { margin: 10px 0 4px; font-weight: 700; color: var(--text); }
+.boardRows td:last-child { width: auto; }
+.vmBox { margin-top: 10px; }
+.vmBox .recentTitle { margin-bottom: 4px; }
 .boardAccount { margin-top: 8px; }
 .boardAccount .button[hidden] { display: none; }
 .recoveryInput { flex: 1; min-width: 0; }
@@ -272,7 +287,10 @@ html, body { margin: 0; height: 100%; overflow: hidden; background: #2a2f25; }
 .speedVal[data-tier="2"] { color: #ffb347; }
 .speedVal[data-tier="3"] { color: #ff7a5c; }
 .hudbar, .chat, .flash, .finishPanel { zoom: var(--hud-scale, 1); }
-.mapCard { grid-template-columns: 26px 1fr auto 130px; }
+.mapCards, .boardList { scrollbar-color: var(--light) var(--well); }
+.mapCards { max-height: min(62vh, 620px); overflow-y: auto; }
+.mapCard { flex: none; grid-template-columns: 26px 1fr auto 72px 130px; }
+.cardPlace { text-align: right; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .shareBox { margin-top: 10px; }
 .shareRow { display: flex; gap: 8px; margin-top: 6px; }
 .shareInput { flex: 1; min-width: 0; color: var(--text); background: var(--well); padding: 4px 6px; border: 1px solid; border-color: var(--dark) var(--light) var(--light) var(--dark); font: inherit; }
