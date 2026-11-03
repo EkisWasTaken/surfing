@@ -699,6 +699,7 @@ async function loadBsp(read: () => Promise<ArrayBuffer>, name: string, stock?: M
     // Texture report so a missing-texture problem shows what happened (decode path, GPU support).
     const texNote = tex ? ` Textures: ${tex.gpu + tex.cpu} loaded${tex.cpu ? ` (${tex.cpu} decoded on CPU: no GPU texture compression)` : ''}, ${tex.missing} missing${tex.missing && !stock && !HOSTED ? (USING_REAL ? ' (install the csgo_legacy beta of CS2 in Steam, then Import again, for the exact textures)' : ' (stock CS:GO: run npm run import-maps with CS:GO legacy installed)') : ''}.` : '';
     hud.setStatus(`Loaded ${m.brushes.length} brushes, ${m.teleports.length} teleports, ${m.pushes.length} boosters; ${goal}.${texNote}`);
+    if (licensedUrl(name) && !loadPicture(m.id)) void drawPictures([{ id: m.id, def: async () => m }]);
   } catch (e) {
     hud.setStatus(e instanceof Error ? e.message : String(e), true);
     hud.chat([{ text: '[Surf] ', tone: 'tag' }, { text: `Couldn't load ${name}: ${e instanceof Error ? e.message : e}`, tone: 'bad' }]);
@@ -736,9 +737,8 @@ async function loadFolderMap(file: string) {
 // ---------- Map picker pictures ----------
 // A map's bytes and stock textures, with no loading screen, for drawing its picture.
 async function folderMapForPicture(file: string) {
-  const permitted = licensedUrl(file);
-  const zip = permitted ? null : await fetch(assetUrl(`/maps/${encodeURIComponent(file.replace(/.bsp$/i, '.stock.zip'))}`)).catch(() => null);
-  const res = await fetch(permitted ?? assetUrl(`/maps/${encodeURIComponent(file)}`));
+  const zip = await fetch(assetUrl(`/maps/${encodeURIComponent(file.replace(/.bsp$/i, '.stock.zip'))}`)).catch(() => null);
+  const res = await fetch(assetUrl(`/maps/${encodeURIComponent(file)}`));
   if (!res.ok) throw new Error(`${file} can't be read`);
   const bsp = parseBsp(await res.arrayBuffer(), file);
   if (zip?.ok) for (const [k, v] of readZip(new Uint8Array(await zip.arrayBuffer()))) if (!bsp.pak.has(k)) bsp.pak.set(k, v);
@@ -755,21 +755,25 @@ function pictureEyes(m: MapDef) {
   });
 }
 // Draws what's missing, one map at a time, on a hidden renderer: only in menus, since a big map takes a moment.
+// Maps that ship with the game are left out: drawing them here would make every player download all of them. Theirs is drawn once played.
 async function drawMapPictures() {
-  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const list = hud.mapList();
   for (const m of list) {
     const saved = loadPicture(m.id);
     if (saved) hud.setCardPicture(m.id, saved);
   }
-  const wanted = list.filter((m) => !loadPicture(m.id) && (builtins.some((b) => b.id === m.id) || (m.id.startsWith('bsp:') && onBoards(m.id))));
-  if (!wanted.length) return;
+  const wanted = list.filter((m) => !loadPicture(m.id) && (builtins.some((b) => b.id === m.id) || (m.id.startsWith('bsp:') && onBoards(m.id) && !licensedUrl(m.id.slice(4)))));
+  await drawPictures(wanted.map(({ id }) => ({ id, def: async () => builtins.find((b) => b.id === id) ?? (await folderMapForPicture(id.slice(4))) })));
+}
+async function drawPictures(jobs: { id: string; def: () => Promise<MapDef> }[]) {
+  if (!jobs.length) return;
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
   const artist = createRenderer(document.createElement('canvas'));
   try {
-    for (const { id } of wanted) {
+    for (const { id, def: getDef } of jobs) {
       do await pause(300); while (input.locked() || hud.busy() || document.hidden);
       try {
-        const def = builtins.find((b) => b.id === id) ?? (await folderMapForPicture(id.slice(4)));
+        const def = await getDef();
         await pause(0);
         artist.setMap(def);
         let best = { score: -1, url: '' };
