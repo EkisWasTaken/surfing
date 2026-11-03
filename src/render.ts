@@ -450,5 +450,30 @@ export function createRenderer(canvas: HTMLCanvasElement) {
       }
     },
     resize,
+    // For a hidden renderer of its own: one view of the world, no arms, as a small image and how good a view it is.
+    picture(eye: Vec3, yaw: number, pitch: number, score: (pixels: Uint8Array) => number) {
+      const w = 160, h = 90;
+      if (renderer.domElement.width !== w) {
+        renderer.setPixelRatio(1);
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+        camera.fov = 2 * Math.atan(Math.tan((100 * DEG) / 2) * 0.75) / DEG;
+        camera.updateProjectionMatrix();
+      }
+      camera.position.copy(toThree(eye));
+      sky.position.copy(camera.position);
+      skybox?.position.copy(camera.position);
+      camera.rotation.y = (yaw - 90) * DEG;
+      camera.rotation.x = -pitch * DEG;
+      renderer.clear();
+      renderer.render(scene, camera);
+      const gl = renderer.getContext(), pixels = new Uint8Array(w * h * 4);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, pixels);
+      return { score: score(pixels), url: renderer.domElement.toDataURL('image/jpeg', 0.72) };
+    },
+    dispose() {
+      renderer.dispose();
+      renderer.forceContextLoss();
+    },
   };
 }

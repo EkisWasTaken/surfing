@@ -16,6 +16,8 @@ import type { VtexJson } from './cs2model';
 import { unb64 } from './b64';
 import licensedMaps from '../licensed-maps/manifest.json';
 import type { Track } from './records';
+import { loadPicture, savePicture, scoreView } from './mapPictures';
+import { trace } from './trace';
 import { createLeaderboard, loadAccount, saveAccount, BoardRow, WRONG_CODE, NAME_TAKEN, BAD_TOKEN } from './leaderboard';
 import { createGrid } from './grid';
 import { newPlayer, unstick, Player } from './movement';
@@ -731,6 +733,62 @@ async function loadFolderMap(file: string) {
   );
 }
 
+// ---------- Map picker pictures ----------
+// A map's bytes and stock textures, with no loading screen, for drawing its picture.
+async function folderMapForPicture(file: string) {
+  const permitted = licensedUrl(file);
+  const zip = permitted ? null : await fetch(assetUrl(`/maps/${encodeURIComponent(file.replace(/.bsp$/i, '.stock.zip'))}`)).catch(() => null);
+  const res = await fetch(permitted ?? assetUrl(`/maps/${encodeURIComponent(file)}`));
+  if (!res.ok) throw new Error(`${file} can't be read`);
+  const bsp = parseBsp(await res.arrayBuffer(), file);
+  if (zip?.ok) for (const [k, v] of readZip(new Uint8Array(await zip.arrayBuffer()))) if (!bsp.pak.has(k)) bsp.pak.set(k, v);
+  return bspToMap(bsp, file);
+}
+// Where to stand: on the floor under each spot, at eye height.
+function pictureEyes(m: MapDef) {
+  const dests = [...new Map(m.teleports.map((t) => [`${t.dest.x},${t.dest.y},${t.dest.z}`, t.dest])).values()];
+  const spots = [m.spawn, ...[0, 1, 2].map((i) => dests[Math.floor((i * dests.length) / 3)]).filter(Boolean)];
+  const { mins, maxs } = config.hullStand;
+  return spots.map((spot) => {
+    const p = unstick(spot, m.brushes), tr = trace(p, sub(p, vec(0, 0, 4096)), mins, maxs, m.brushes);
+    return add(tr.fraction < 1 ? tr.endPos : p, vec(0, 0, config.eyeStand));
+  });
+}
+// Draws what's missing, one map at a time, on a hidden renderer: only in menus, since a big map takes a moment.
+async function drawMapPictures() {
+  const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const list = hud.mapList();
+  for (const m of list) {
+    const saved = loadPicture(m.id);
+    if (saved) hud.setCardPicture(m.id, saved);
+  }
+  const wanted = list.filter((m) => !loadPicture(m.id) && (builtins.some((b) => b.id === m.id) || (m.id.startsWith('bsp:') && onBoards(m.id))));
+  if (!wanted.length) return;
+  const artist = createRenderer(document.createElement('canvas'));
+  try {
+    for (const { id } of wanted) {
+      do await pause(300); while (input.locked() || hud.busy() || document.hidden);
+      try {
+        const def = builtins.find((b) => b.id === id) ?? (await folderMapForPicture(id.slice(4)));
+        await pause(0);
+        artist.setMap(def);
+        let best = { score: -1, url: '' };
+        for (const eye of pictureEyes(def))
+          for (const turn of [0, 90, 180, 270]) {
+            const view = artist.picture(eye, def.spawnYaw + turn, 4, scoreView);
+            if (view.score > best.score) best = view;
+          }
+        savePicture(id, best.url);
+        hud.setCardPicture(id, best.url);
+      } catch (e) {
+        console.warn('map picture:', id, e); // keeps its colours, and it's tried again next time
+      }
+    }
+  } finally {
+    artist.dispose();
+  }
+}
+
 // CS2's arms and knives, decoded by `npm run import-maps` from the local CS2 install (absent → no viewmodel).
 const json = (url: string) => fetch(assetUrl(url)).then((r) => (r.ok && r.headers.get('content-type')?.includes('json') ? r.json() : null));
 /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
@@ -844,6 +902,7 @@ fetch(assetUrl('/maps/index.json'))
     }
     refreshRecords();
     startBoards();
+    drawMapPictures();
     if (wantedMap.startsWith('bsp:') && files.includes(wantedMap.slice(4))) loadFolderMap(wantedMap.slice(4));
   })
   .catch(() => {}); // no dev server endpoint: built-in maps and file loading still work
@@ -909,7 +968,7 @@ function startBoards() {
   const code = settings.groupCode;
   syncBoards().then(() => loadBoards(code)).catch(() => {}); // offline: the start screen just shows no places
 }
-if (OWN_MODELS) startBoards(); // otherwise once the list of Steam maps has arrived
+if (OWN_MODELS) (startBoards(), drawMapPictures()); // otherwise once the list of Steam maps has arrived
 input.onLockRefused(() => !menuClosed && hud.flash('Your browser needs a moment. Click Play again.'));
 input.setKeys(settings.keys);
 input.setFullscreen(settings.fullscreen);

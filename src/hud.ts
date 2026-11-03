@@ -2,6 +2,7 @@ import { Settings, defaults, viewmodelFov, VM_FOV_MIN, VM_FOV_MAX, VM_OFFSET } f
 import { gameLabel } from './hosted';
 import { formatTime } from './timer';
 import { bindLabel, wheelCode } from './input';
+import { mapColours } from './mapPictures';
 
 type HudOptions = {
   maps: { id: string; name: string; theme?: { zenith: string; horizon: string } }[];
@@ -714,6 +715,11 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
       speedVal.textContent = String(Math.round(u));
       speedVal.dataset.tier = u >= 3000 ? '3' : u >= 2000 ? '2' : u >= 1000 ? '1' : '';
     },
+    setCardPicture(mapId: string, url: string) {
+      const c = cards.find((x) => x.dataset.map === mapId)?.querySelector('i');
+      if (c) c.style.background = `url("${url}") center / cover`;
+    },
+    busy: () => !$('.loading').hidden,
     // Your place on each map, on the start screen.
     setCardPlaces(places: Map<string, string>) {
       for (const c of cards) c.querySelector('.cardPlace')!.textContent = places.get(c.dataset.map!) ?? '';
@@ -855,6 +861,7 @@ export function createHud(root: HTMLElement, opts: HudOptions) {
         card.innerHTML = '<i></i><strong></strong><small></small><span class="cardPlace"></span><span class="cardBest"></span>';
         card.querySelector('strong')!.textContent = m.name.replace(/^(CS:GO|Imported): /, '');
         card.querySelector('small')!.textContent = difficulty;
+        card.querySelector('i')!.style.background = mapColours(m.name);
         card.addEventListener('click', () => pickCard(card));
         $('.mapCards').append(card);
         cards.push(card);
